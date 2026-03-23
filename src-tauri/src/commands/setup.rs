@@ -50,10 +50,24 @@ pub async fn setup_spreadsheet(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SetupResult, String> {
-    // Load service account path from environment
-    let sa_path = std::env::var("SERVICE_ACCOUNT_JSON")
-        .unwrap_or_else(|_| "./service-account.json".to_string());
-    let personal_gmail = std::env::var("PERSONAL_GMAIL").unwrap_or_default();
+    // Resolve service account JSON path:
+    // 1. Env var (dev mode: points to local file)
+    // 2. Bundled resource inside the installed app
+    let sa_path = std::env::var("SERVICE_ACCOUNT_JSON").unwrap_or_else(|_| {
+        app.path().resource_dir()
+            .map(|p| p.join("resources").join("service-account.json").to_string_lossy().to_string())
+            .unwrap_or_else(|_| "./service-account.json".to_string())
+    });
+
+    // Resolve personal Gmail the same way
+    let personal_gmail = std::env::var("PERSONAL_GMAIL").unwrap_or_else(|_| {
+        app.path().resource_dir()
+            .ok()
+            .and_then(|p| std::fs::read_to_string(p.join("resources").join("gmail.txt")).ok())
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    });
 
     // Initialize auth
     let auth = AuthClient::from_file(&sa_path)?;
