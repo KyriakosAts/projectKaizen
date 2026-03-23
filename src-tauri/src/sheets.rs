@@ -448,7 +448,7 @@ impl SheetsClient {
             return Err(format!("get_sheet_id error {}: {}", status, text));
         }
 
-        let data: CreateSpreadsheetResponse = resp
+        let data: SheetListResponse = resp
             .json()
             .await
             .map_err(|e| format!("get_sheet_id parse error: {}", e))?;
