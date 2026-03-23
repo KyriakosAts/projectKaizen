@@ -62,7 +62,12 @@ impl AuthClient {
     pub fn from_file(path: &str) -> Result<Self, String> {
         let raw = std::fs::read_to_string(path)
             .map_err(|e| format!("Cannot read service account file '{}': {}", path, e))?;
-        let key: ServiceAccountKey = serde_json::from_str(&raw)
+        Self::from_json_str(&raw)
+    }
+
+    /// Load a service account key from a JSON string (used for compile-time embedded credentials).
+    pub fn from_json_str(json: &str) -> Result<Self, String> {
+        let key: ServiceAccountKey = serde_json::from_str(json)
             .map_err(|e| format!("Invalid service account JSON: {}", e))?;
         Ok(Self {
             key,

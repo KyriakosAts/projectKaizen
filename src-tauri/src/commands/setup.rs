@@ -50,27 +50,24 @@ pub async fn setup_spreadsheet(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SetupResult, String> {
-    // Resolve service account JSON path:
-    // 1. Env var (dev mode: points to local file)
-    // 2. Bundled resource inside the installed app
-    let sa_path = std::env::var("SERVICE_ACCOUNT_JSON").unwrap_or_else(|_| {
-        app.path().resource_dir()
-            .map(|p| p.join("resources").join("sa.json").to_string_lossy().to_string())
-            .unwrap_or_else(|_| "./sa.json".to_string())
-    });
+    // Credentials embedded at compile time by the CI workflow (include_str! bakes them in).
+    // In local dev: set SERVICE_ACCOUNT_JSON env var to a file path, or
+    // SERVICE_ACCOUNT_JSON_CONTENT to the raw JSON string.
+    const BUNDLED_SA: &str = include_str!("../../resources/sa.json");
+    const BUNDLED_GMAIL: &str = include_str!("../../resources/gmail.txt");
 
-    // Resolve personal Gmail the same way
-    let personal_gmail = std::env::var("PERSONAL_GMAIL").unwrap_or_else(|_| {
-        app.path().resource_dir()
-            .ok()
-            .and_then(|p| std::fs::read_to_string(p.join("resources").join("gmail.txt")).ok())
-            .unwrap_or_default()
-            .trim()
-            .to_string()
-    });
+    let sa_json = std::env::var("SERVICE_ACCOUNT_JSON_CONTENT")
+        .or_else(|_| {
+            std::env::var("SERVICE_ACCOUNT_JSON")
+                .and_then(|p| std::fs::read_to_string(&p).map_err(|_| std::env::VarError::NotPresent))
+        })
+        .unwrap_or_else(|_| BUNDLED_SA.to_string());
+
+    let personal_gmail = std::env::var("PERSONAL_GMAIL")
+        .unwrap_or_else(|_| BUNDLED_GMAIL.trim().to_string());
 
     // Initialize auth
-    let auth = AuthClient::from_file(&sa_path)?;
+    let auth = AuthClient::from_json_str(&sa_json)?;
     let drive = DriveClient::new(auth.clone());
 
     // Load or create config
