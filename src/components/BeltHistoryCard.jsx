@@ -62,7 +62,12 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
   const memberHistory = useMemo(() => {
     const raw = beltHistory
       .filter(b => b.memberId === member.id)
-      .sort((a, b) => new Date(a.promotedAt) - new Date(b.promotedAt)) // ascending
+      .sort((a, b) => {
+        const d = new Date(a.promotedAt) - new Date(b.promotedAt)
+        if (d !== 0) return d
+        // Tiebreaker: createdAt (older record = earlier in history)
+        return new Date(a.createdAt ?? 0) - new Date(b.createdAt ?? 0)
+      }) // ascending
 
     const now = new Date()
     return raw.map((entry, idx) => {
