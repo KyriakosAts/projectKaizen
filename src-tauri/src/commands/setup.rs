@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{Manager, State};
 use crate::{
     auth::AuthClient,
     drive::DriveClient,
