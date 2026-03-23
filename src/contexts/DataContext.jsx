@@ -49,7 +49,7 @@ export function DataProvider({ children }) {
         belts:        safeParseJSON(m.belts,         {}),
         serviceDates: safeParseJSON(m.serviceDates ?? m.service_dates, {}),
         joinDate:     m.joinDate ?? m.join_date,
-        customFee:    m.customFee ?? m.custom_fee ?? null,
+        customFee:    (() => { const v = m.customFee ?? m.custom_fee; return (v != null && v !== '') ? Number(v) : null })(),
         createdAt:    m.createdAt ?? m.created_at,
         updatedAt:    m.updatedAt ?? m.updated_at,
       }))

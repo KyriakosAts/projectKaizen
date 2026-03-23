@@ -131,7 +131,7 @@ export function formatDate(value) {
 
 // ─── Currency ─────────────────────────────────────────────────────────────────
 export function formatCurrency(amount) {
-  return `€${(amount ?? 0).toFixed(0)}`
+  return `€${(Number(amount) || 0).toFixed(0)}`
 }
 
 // ─── Avatar ───────────────────────────────────────────────────────────────────

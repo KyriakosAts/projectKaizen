@@ -102,14 +102,17 @@ pub async fn setup_spreadsheet(
         }
     }
 
-    // Create backup folder if needed
+    // Create backup folder if needed (non-fatal — Drive permissions may be restricted)
     if config.backup_folder_id.is_empty() {
-        let folder_id = drive.find_or_create_folder(BACKUP_FOLDER_NAME).await?;
-        config.backup_folder_id = folder_id.clone();
-
-        if !personal_gmail.is_empty() {
-            drive.share_with_email(&folder_id, &personal_gmail).await
-                .unwrap_or_else(|e| eprintln!("Warning: could not share backup folder: {}", e));
+        match drive.find_or_create_folder(BACKUP_FOLDER_NAME).await {
+            Ok(folder_id) => {
+                config.backup_folder_id = folder_id.clone();
+                if !personal_gmail.is_empty() {
+                    drive.share_with_email(&folder_id, &personal_gmail).await
+                        .unwrap_or_else(|e| eprintln!("Warning: could not share backup folder: {}", e));
+                }
+            }
+            Err(e) => eprintln!("Warning: could not create backup folder (backup unavailable): {}", e),
         }
     }
 
