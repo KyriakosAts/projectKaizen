@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { Sun, Moon, Palette, Clock, Check, Monitor, Image, Building2, Shield, Upload, FileSpreadsheet, Keyboard } from 'lucide-react'
+import { Sun, Moon, Palette, Clock, Check, Monitor, Image, Building2, Shield, Upload, FileSpreadsheet, Keyboard, Database, Copy, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
 import { useData } from '../contexts/DataContext'
+import * as sheets from '../services/sheetsService'
 import { useTheme, ACCENT_PALETTES, TIME_FORMATS, DATE_FORMATS } from '../contexts/ThemeContext'
 import { useServices } from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
@@ -722,6 +723,95 @@ const DEFAULT_SHORTCUTS = [
   { id: 'close',     label: 'Close Modal / Back',  defaultKey: 'Escape',  category: 'Actions' },
 ]
 
+// ── Database connection section ───────────────────────────────────────────────
+function DatabaseSection() {
+  const { error, retrySetup, setupLoading } = useData()
+  const [saEmail, setSaEmail]   = useState('')
+  const [sheetId, setSheetId]   = useState('')
+  const [status,  setStatus]    = useState(null) // null | 'ok' | 'err'
+  const [msg,     setMsg]       = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [copied,  setCopied]    = useState(false)
+
+  useEffect(() => {
+    sheets.getServiceAccountEmail().then(setSaEmail).catch(() => {})
+    sheets.getAppConfig().then(cfg => {
+      if (cfg?.spreadsheetId) { setStatus('ok'); setMsg(`Connected: ${cfg.spreadsheetId}`) }
+    }).catch(() => {})
+  }, [])
+
+  async function handleConnect() {
+    if (!sheetId.trim()) return
+    setLoading(true); setStatus(null); setMsg('')
+    try {
+      const id = sheetId.trim().replace(/.*\/d\/([^/]+).*/, '$1') // accept full URL or bare ID
+      await sheets.connectSpreadsheet(id)
+      setStatus('ok')
+      setMsg(`Connected! Spreadsheet ID: ${id}`)
+      await retrySetup()
+    } catch (e) {
+      setStatus('err')
+      setMsg(typeof e === 'string' ? e : e.message ?? 'Connection failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function copyEmail() {
+    navigator.clipboard.writeText(saEmail)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <SettingSection icon={Database} title="Database Connection" description="Connect the app to your Google Sheet.">
+      {/* Service account email */}
+      <div className="mb-4">
+        <p className="text-xs font-semibold text-gray-600 mb-1.5">Service account email (share your sheet with this)</p>
+        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+          <p className="flex-1 text-xs font-mono text-gray-700 truncate">{saEmail || 'Loading…'}</p>
+          <button onClick={copyEmail} className="shrink-0 text-gray-400 hover:text-gray-700">
+            {copied ? <CheckCircle size={14} className="text-green-500" /> : <Copy size={14} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Instructions */}
+      <ol className="text-xs text-gray-500 space-y-1 mb-4 list-decimal list-inside leading-relaxed">
+        <li>Go to <strong className="text-gray-700">sheets.google.com</strong> → create a new blank spreadsheet → name it <strong className="text-gray-700">Dojo Patras</strong></li>
+        <li>Click <strong className="text-gray-700">Share</strong> → paste the email above → set to <strong className="text-gray-700">Editor</strong> → Send</li>
+        <li>Copy the URL or spreadsheet ID and paste it below</li>
+      </ol>
+
+      {/* Sheet ID input */}
+      <div className="flex gap-2">
+        <input
+          value={sheetId}
+          onChange={e => setSheetId(e.target.value)}
+          placeholder="Paste spreadsheet URL or ID…"
+          className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-400"
+        />
+        <button
+          onClick={handleConnect}
+          disabled={loading || !sheetId.trim()}
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors"
+        >
+          {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
+          Connect
+        </button>
+      </div>
+
+      {/* Status */}
+      {status && (
+        <div className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2 text-xs ${status === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          {status === 'ok' ? <CheckCircle size={14} className="mt-0.5 shrink-0" /> : <XCircle size={14} className="mt-0.5 shrink-0" />}
+          <span className="break-all">{msg}</span>
+        </div>
+      )}
+    </SettingSection>
+  )
+}
+
 function ShortcutsSection() {
   const [shortcuts, setShortcuts] = useState(() => {
     try {
@@ -1047,6 +1137,8 @@ export default function SettingsPage() {
       <ShortcutsSection />
 
       {/* Footer */}
+      <DatabaseSection />
+
       <div className="text-center py-4">
         <p className="text-xs text-gray-400">All preferences are saved locally and persist across sessions.</p>
         <p className="text-xs text-gray-400 mt-1">{gymName} · v0.oneAndOnly</p>

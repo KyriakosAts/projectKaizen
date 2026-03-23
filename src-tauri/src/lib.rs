@@ -19,6 +19,8 @@ pub fn run() {
             // Setup
             commands::setup::setup_spreadsheet,
             commands::setup::get_app_config,
+            commands::setup::connect_spreadsheet,
+            commands::setup::get_service_account_email,
             // Members
             commands::members::get_members,
             commands::members::add_member,

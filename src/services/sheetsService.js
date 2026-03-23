@@ -43,8 +43,10 @@ const ls = {
 // Command handlers for localStorage mode — mirror every Tauri command exactly
 const LOCAL = {
   // ── Setup ──────────────────────────────────────────────────────────────────
-  setup_spreadsheet: ()  => null,
-  get_app_config:    ()  => ({ spreadsheetId: null, backupFolderId: null, lastBackup: null }),
+  setup_spreadsheet:       ()   => null,
+  get_app_config:          ()   => ({ spreadsheetId: null, backupFolderId: null, lastBackup: null }),
+  connect_spreadsheet:     ()   => ({ spreadsheetId: 'local', backupFolderId: '', created: false }),
+  get_service_account_email: () => 'local-mode@localStorage',
 
   // ── Members ────────────────────────────────────────────────────────────────
   get_members: () => ls.get(LS.members, []),
@@ -184,8 +186,10 @@ async function call(cmd, args = {}) {
 // ── Public API ────────────────────────────────────────────────────────────────
 // (identical signatures to the old Tauri-only version)
 
-export const setupSpreadsheet     = ()                    => call('setup_spreadsheet')
-export const getAppConfig         = ()                    => call('get_app_config')
+export const setupSpreadsheet          = ()    => call('setup_spreadsheet')
+export const getAppConfig              = ()    => call('get_app_config')
+export const connectSpreadsheet        = (id)  => call('connect_spreadsheet', { spreadsheetId: id })
+export const getServiceAccountEmail    = ()    => call('get_service_account_email')
 
 export const getMembers           = ()                    => call('get_members')
 export const addMember            = (data)                => call('add_member',             { data })

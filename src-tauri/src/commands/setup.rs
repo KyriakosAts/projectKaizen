@@ -146,3 +146,79 @@ pub async fn get_app_config(
     let config_path = config_file_path(&app);
     Ok(load_config(&config_path))
 }
+
+/// Connect to an existing spreadsheet the user created and shared manually.
+/// Validates the connection, writes headers if tabs are missing, saves config.
+#[tauri::command]
+pub async fn connect_spreadsheet(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    spreadsheet_id: String,
+) -> Result<SetupResult, String> {
+    const BUNDLED_SA: &str = include_str!("../../resources/sa.json");
+    let sa_json = std::env::var("SERVICE_ACCOUNT_JSON_CONTENT")
+        .or_else(|_| {
+            std::env::var("SERVICE_ACCOUNT_JSON")
+                .and_then(|p| std::fs::read_to_string(&p).map_err(|_| std::env::VarError::NotPresent))
+        })
+        .unwrap_or_else(|_| BUNDLED_SA.to_string());
+
+    let auth  = AuthClient::from_json_str(&sa_json)?;
+    let drive = DriveClient::new(auth.clone());
+    let sheets = SheetsClient::new(spreadsheet_id.clone(), auth.clone());
+
+    // Verify access — this will 403 immediately if not shared with the SA
+    sheets.get_all_rows(SHEET_MEMBERS).await
+        .map_err(|e| format!("Cannot access spreadsheet: {}. Make sure you shared it with the service account as Editor.", e))?;
+
+    // Write headers to any tabs that are empty (idempotent)
+    for tab in ALL_TABS {
+        let is_config_tab = *tab == SHEET_CONFIG_SVC || *tab == SHEET_CONFIG_SCH || *tab == SHEET_CONFIG_INST;
+        if !is_config_tab {
+            let rows = sheets.get_all_rows(tab).await.unwrap_or_default();
+            if rows.is_empty() {
+                sheets.write_headers(tab, &headers_for(tab)).await
+                    .unwrap_or_else(|e| eprintln!("Warning: could not write headers to {}: {}", tab, e));
+            }
+        }
+    }
+
+    // Persist config
+    let config_path = config_file_path(&app);
+    let mut config = load_config(&config_path);
+    config.spreadsheet_id = spreadsheet_id.clone();
+    save_config(&config_path, &config)?;
+
+    // Populate app state
+    {
+        let mut auth_guard   = state.auth.lock().await;   *auth_guard   = Some(auth.clone());
+        let mut sheets_guard = state.sheets.lock().await; *sheets_guard = Some(sheets);
+        let mut drive_guard  = state.drive.lock().await;  *drive_guard  = Some(drive);
+        let mut config_guard = state.config.lock().await; *config_guard = config.clone();
+    }
+
+    Ok(SetupResult {
+        spreadsheet_id,
+        backup_folder_id: config.backup_folder_id,
+        created: false,
+    })
+}
+
+/// Return the service account email embedded in the binary.
+/// Used in the Settings UI so the user knows which email to share their sheet with.
+#[tauri::command]
+pub fn get_service_account_email() -> String {
+    const BUNDLED_SA: &str = include_str!("../../resources/sa.json");
+    let sa_json = std::env::var("SERVICE_ACCOUNT_JSON_CONTENT")
+        .or_else(|_| {
+            std::env::var("SERVICE_ACCOUNT_JSON")
+                .and_then(|p| std::fs::read_to_string(&p).map_err(|_| std::env::VarError::NotPresent))
+        })
+        .unwrap_or_else(|_| BUNDLED_SA.to_string());
+
+    #[derive(serde::Deserialize)]
+    struct EmailOnly { client_email: String }
+    serde_json::from_str::<EmailOnly>(&sa_json)
+        .map(|k| k.client_email)
+        .unwrap_or_else(|_| "unknown (credentials not configured)".to_string())
+}
