@@ -43,9 +43,12 @@ jobs:
 
       # ── Embed credentials as bundled resources ───────────────────────────────
       - name: Write credentials into Tauri resources
+        env:
+          SA_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
+          PERSONAL_GMAIL: ${{ secrets.PERSONAL_GMAIL }}
         run: |
-          echo '${{ secrets.SERVICE_ACCOUNT_JSON }}' > src-tauri/resources/sa.json
-          echo '${{ secrets.PERSONAL_GMAIL }}' > src-tauri/resources/gmail.txt
+          printf '%s' "$SA_JSON" > src-tauri/resources/sa.json
+          printf '%s' "$PERSONAL_GMAIL" > src-tauri/resources/gmail.txt
         shell: bash
 
       # ── Node dependencies ────────────────────────────────────────────────────

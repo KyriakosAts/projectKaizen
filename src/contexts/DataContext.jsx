@@ -19,8 +19,9 @@ export function DataProvider({ children }) {
   const [beltHistory, setBeltHistory] = useState([])
   const [memberNotes, setMemberNotes] = useState([])
   const [attendance,  setAttendance]  = useState([])
-  const [loading,     setLoading]     = useState(true)
-  const [error,       setError]       = useState(null)
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState(null)
+  const [setupLoading, setSetupLoading] = useState(false)
 
   // ── Initial data load ────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -109,11 +110,25 @@ export function DataProvider({ children }) {
     } catch (err) {
       console.error('[DataContext] Failed to load data:', err)
       const msg = typeof err === 'string' ? err : err.message ?? 'Unknown error'
-      setError(`Firebase connection failed. Check your .env configuration.\n\nDetails: ${msg}`)
+      setError(msg)
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const retrySetup = useCallback(async () => {
+    setSetupLoading(true)
+    setError(null)
+    try {
+      await sheets.setupSpreadsheet()
+      await loadData()
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : err.message ?? 'Unknown error'
+      setError(msg)
+    } finally {
+      setSetupLoading(false)
+    }
+  }, [loadData])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -304,6 +319,7 @@ export function DataProvider({ children }) {
   // ── Context value ──────────────────────────────────────────────────────────
   const value = {
     members, payments, comments, beltHistory, memberNotes, attendance, loading, error,
+    setupLoading, retrySetup,
     addMember, updateMember, deleteMember,
     addPayment, markPaymentPaid, markPaymentUnpaid,
     upsertComment, getComment,
