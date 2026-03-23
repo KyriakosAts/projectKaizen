@@ -34,6 +34,11 @@ struct CreateSpreadsheetResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct SheetListResponse {
+    sheets: Option<Vec<SheetInfo>>,
+}
+
+#[derive(Debug, Deserialize)]
 struct SheetInfo {
     properties: SheetProperties,
 }
@@ -388,7 +393,7 @@ impl SheetsClient {
             return Err(format!("verify_access error {}: {}. Make sure you shared the spreadsheet with the service account as Editor.", status, text));
         }
 
-        let data: CreateSpreadsheetResponse = resp.json().await
+        let data: SheetListResponse = resp.json().await
             .map_err(|e| format!("verify_access parse error: {}", e))?;
 
         Ok(data.sheets.unwrap_or_default()
