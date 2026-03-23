@@ -1,6 +1,4 @@
 use image::{ImageBuffer, Rgba, RgbaImage};
-use imageproc::drawing::{draw_filled_circle_mut, draw_filled_rect_mut, draw_line_segment_mut};
-use imageproc::rect::Rect;
 use std::path::Path;
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -322,7 +320,7 @@ fn main() {
 
     save_ico(
         &[(256, img256), (128, img128), (64, img64), (48, img48), (32, img32), (16, img16)],
-        out_ico,
+        Path::new("src-tauri/icons/icon.ico"),
     ).unwrap();
 
     println!("Done!");
