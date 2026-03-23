@@ -1,0 +1,19 @@
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Credentials — NEVER commit these
+.env
+.env.local
+service-account.json
+*-service-account.json
+*-credentials.json
+# Catch any service account JSON by GCP project ID pattern (alphanumeric-hex.json)
+projectkaizen*.json
+
+# Node
+node_modules/
+dist/
+
+# Logs
+*.log

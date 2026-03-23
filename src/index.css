@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Primary color CSS variables (orange defaults) ───────────────────────── */
+/* These are space-separated RGB channels so opacity modifiers work:          */
+/* bg-primary-500/20 → rgb(var(--primary-500) / 0.2)                         */
+:root {
+  --primary-50:  255 247 237;
+  --primary-100: 255 237 213;
+  --primary-400: 251 146 60;
+  --primary-500: 249 115 22;
+  --primary-600: 234 88 12;
+  --primary-700: 194 65 12;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
+@layer base {
+  body {
+    @apply bg-slate-50 text-gray-900 antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    transition: background-color 250ms ease, color 250ms ease;
+  }
+  * { box-sizing: border-box; }
+}
+
+/* ── Dark mode — structural overrides ─────────────────────────────────────── */
+/* Uses higher specificity (.dark .class) to override Tailwind's single-class  */
+/* generated styles without needing !important.                                */
+
+/* Page & section backgrounds */
+.dark body,
+.dark .bg-slate-50     { background-color: #0f172a; }
+.dark .bg-white        { background-color: #1e293b; }
+.dark .bg-gray-50      { background-color: #1e293b; }
+.dark .bg-gray-100     { background-color: #334155; }
+.dark .bg-gray-200     { background-color: #475569; }
+
+/* Table striping & hover */
+.dark .bg-slate-50\/40 { background-color: rgb(15 23 42 / 0.4); }
+.dark .hover\:bg-gray-50\/60:hover { background-color: rgb(51 65 85 / 0.6); }
+.dark .hover\:bg-gray-50:hover     { background-color: #334155; }
+.dark .hover\:bg-gray-100:hover    { background-color: #475569; }
+
+/* Borders */
+.dark .border-gray-200 { border-color: #334155; }
+.dark .border-gray-100 { border-color: #1e293b; }
+.dark .divide-gray-50  > * + * { border-color: #1e293b; }
+
+/* Text */
+.dark .text-gray-900 { color: #f1f5f9; }
+.dark .text-gray-800 { color: #e2e8f0; }
+.dark .text-gray-700 { color: #cbd5e1; }
+.dark .text-gray-600 { color: #94a3b8; }
+.dark .text-gray-500 { color: #64748b; }
+.dark .text-gray-400 { color: #475569; }
+
+/* Inputs */
+.dark input:not([type='range']),
+.dark textarea,
+.dark select {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b; }
+
+/* Cards/panels with shadow */
+.dark .shadow-sm   { box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+.dark .shadow-lg   { box-shadow: 0 10px 30px rgb(0 0 0 / 0.5); }
+.dark .shadow-xl   { box-shadow: 0 20px 40px rgb(0 0 0 / 0.6); }
+
+/* Recharts chart text */
+.dark .recharts-text { fill: #94a3b8 !important; }
+.dark .recharts-cartesian-axis-line { stroke: #334155 !important; }
+.dark .recharts-cartesian-grid-horizontal line,
+.dark .recharts-cartesian-grid-vertical line { stroke: #334155 !important; }
+
+/* ── Smooth scrollbars ────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb { background: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Date picker icon ─────────────────────────────────────────────────────── */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+}
+
+/* ── Transitions ──────────────────────────────────────────────────────────── */
+a, button {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+table { border-collapse: collapse; }
+
+/* ── Activity grid scroll ─────────────────────────────────────────────────── */
+.activity-scroll::-webkit-scrollbar { height: 8px; }
+.activity-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+
+/* ── Settings dropdown animation ──────────────────────────────────────────── */
+@keyframes dropdown-appear {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+.dropdown-appear {
+  animation: dropdown-appear 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+/* ── Japanese accent styles ───────────────────────────────────────────────── */
+.japan-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-size: 0.7rem;
+  margin: 0.75rem 0;
+}
+.japan-divider::before,
+.japan-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, #e2e8f0, transparent);
+}
+
+/* ── Print styles ─────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide sidebar, topbar, buttons, action columns */
+  aside, header, .no-print, button { display: none !important; }
+  /* Full width content */
+  main { overflow: visible !important; }
+  .flex.h-screen { display: block !important; }
+  /* Clean backgrounds */
+  body, .bg-slate-50, .bg-white, .bg-gray-50 { background: white !important; color: black !important; }
+  /* Table borders */
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; font-size: 11px; }
+  /* Page title */
+  .print-title { display: block !important; font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+}
+.print-title { display: none; }

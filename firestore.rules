@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Admin-only app — restrict to authenticated users only
+    // For internal tool use: lock down to specific user(s) or service account
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Members
+    match /members/{memberId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Attendance
+    match /attendance/{attendanceId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Belt history
+    match /beltHistory/{entryId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Member notes
+    match /memberNotes/{noteId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Comments
+    match /comments/{commentId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // App config (services, schedule, instructors)
+    match /config/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

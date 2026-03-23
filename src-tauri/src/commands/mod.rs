@@ -1,0 +1,9 @@
+pub mod setup;
+pub mod members;
+pub mod payments;
+pub mod attendance;
+pub mod belt;
+pub mod notes;
+pub mod comments;
+pub mod config_cmds;
+pub mod backup;
