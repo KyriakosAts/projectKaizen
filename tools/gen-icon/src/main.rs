@@ -302,13 +302,6 @@ fn save_ico(images: &[(u32, RgbaImage)], path: &Path) -> std::io::Result<()> {
 }
 
 fn main() {
-    // Output paths relative to project root (run from project root)
-    let out_png = Path::new("src-tauri/icons/icon.png");
-    let out_ico = Path::new("src-tauri/icons/icon.ico");
-    let out_32  = Path::new("src-tauri/icons/32x32.png");
-    let out_128 = Path::new("src-tauri/icons/128x128.png");
-    let out_logo = Path::new("logo.png");
-
     std::fs::create_dir_all("src-tauri/icons").unwrap();
 
     println!("Rendering icons...");
@@ -320,10 +313,12 @@ fn main() {
     let img32  = image::imageops::resize(&img256, 32,  32,  image::imageops::FilterType::Lanczos3);
     let img16  = image::imageops::resize(&img256, 16,  16,  image::imageops::FilterType::Lanczos3);
 
-    img256.save(out_png).unwrap();
-    img256.save(out_logo).unwrap();
-    img128.save(out_128).unwrap();
-    img32.save(out_32).unwrap();
+    // 256x256 also serves as 128x128@2x (retina)
+    img256.save("src-tauri/icons/icon.png").unwrap();
+    img256.save("src-tauri/icons/128x128@2x.png").unwrap();
+    img256.save("logo.png").unwrap();
+    img128.save("src-tauri/icons/128x128.png").unwrap();
+    img32.save("src-tauri/icons/32x32.png").unwrap();
 
     save_ico(
         &[(256, img256), (128, img128), (64, img64), (48, img48), (32, img32), (16, img16)],
