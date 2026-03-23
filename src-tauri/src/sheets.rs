@@ -369,6 +369,58 @@ impl SheetsClient {
         Ok(())
     }
 
+    // ─── VERIFY ACCESS ───────────────────────────────────────────────────────
+
+    /// Verify that the service account can access this spreadsheet.
+    /// Returns list of existing tab names.
+    pub async fn verify_access(&self) -> Result<Vec<String>, String> {
+        let url = format!("{}/{}?fields=sheets.properties.title", SHEETS_BASE, self.spreadsheet_id);
+        let resp = self.http
+            .get(&url)
+            .bearer_auth(&self.bearer().await?)
+            .send()
+            .await
+            .map_err(|e| format!("verify_access request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("verify_access error {}: {}. Make sure you shared the spreadsheet with the service account as Editor.", status, text));
+        }
+
+        let data: CreateSpreadsheetResponse = resp.json().await
+            .map_err(|e| format!("verify_access parse error: {}", e))?;
+
+        Ok(data.sheets.unwrap_or_default()
+            .into_iter()
+            .map(|s| s.properties.title)
+            .collect())
+    }
+
+    // ─── ADD SHEET TAB ───────────────────────────────────────────────────────
+
+    /// Add a new sheet tab to the spreadsheet.
+    pub async fn add_sheet(&self, name: &str) -> Result<(), String> {
+        let body = json!({
+            "requests": [{ "addSheet": { "properties": { "title": name } } }]
+        });
+        let url = format!("{}/{}:batchUpdate", SHEETS_BASE, self.spreadsheet_id);
+        let resp = self.http
+            .post(&url)
+            .bearer_auth(&self.bearer().await?)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("add_sheet request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("add_sheet error {}: {}", status, text));
+        }
+        Ok(())
+    }
+
     // ─── GET SHEET ID ────────────────────────────────────────────────────────
 
     /// Get the internal numeric sheet ID for a named tab.

@@ -167,19 +167,19 @@ pub async fn connect_spreadsheet(
     let drive = DriveClient::new(auth.clone());
     let sheets = SheetsClient::new(spreadsheet_id.clone(), auth.clone());
 
-    // Verify access — this will 403 immediately if not shared with the SA
-    sheets.get_all_rows(SHEET_MEMBERS).await
-        .map_err(|e| format!("Cannot access spreadsheet: {}. Make sure you shared it with the service account as Editor.", e))?;
+    // Verify access and get list of existing tabs
+    let existing_tabs = sheets.verify_access().await?;
 
-    // Write headers to any tabs that are empty (idempotent)
+    // Create any missing tabs then write headers
     for tab in ALL_TABS {
         let is_config_tab = *tab == SHEET_CONFIG_SVC || *tab == SHEET_CONFIG_SCH || *tab == SHEET_CONFIG_INST;
+        if !existing_tabs.contains(&tab.to_string()) {
+            sheets.add_sheet(tab).await
+                .unwrap_or_else(|e| eprintln!("Warning: could not create tab {}: {}", tab, e));
+        }
         if !is_config_tab {
-            let rows = sheets.get_all_rows(tab).await.unwrap_or_default();
-            if rows.is_empty() {
-                sheets.write_headers(tab, &headers_for(tab)).await
-                    .unwrap_or_else(|e| eprintln!("Warning: could not write headers to {}: {}", tab, e));
-            }
+            sheets.write_headers(tab, &headers_for(tab)).await
+                .unwrap_or_else(|e| eprintln!("Warning: could not write headers to {}: {}", tab, e));
         }
     }
 
