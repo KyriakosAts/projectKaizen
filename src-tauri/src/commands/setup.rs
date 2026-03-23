@@ -55,8 +55,8 @@ pub async fn setup_spreadsheet(
     // 2. Bundled resource inside the installed app
     let sa_path = std::env::var("SERVICE_ACCOUNT_JSON").unwrap_or_else(|_| {
         app.path().resource_dir()
-            .map(|p| p.join("resources").join("service-account.json").to_string_lossy().to_string())
-            .unwrap_or_else(|_| "./service-account.json".to_string())
+            .map(|p| p.join("resources").join("sa.json").to_string_lossy().to_string())
+            .unwrap_or_else(|_| "./sa.json".to_string())
     });
 
     // Resolve personal Gmail the same way

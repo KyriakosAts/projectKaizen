@@ -44,8 +44,7 @@ jobs:
       # ── Embed credentials as bundled resources ───────────────────────────────
       - name: Write credentials into Tauri resources
         run: |
-          mkdir -p src-tauri/resources
-          echo '${{ secrets.SERVICE_ACCOUNT_JSON }}' > src-tauri/resources/service-account.json
+          echo '${{ secrets.SERVICE_ACCOUNT_JSON }}' > src-tauri/resources/sa.json
           echo '${{ secrets.PERSONAL_GMAIL }}' > src-tauri/resources/gmail.txt
         shell: bash
 
