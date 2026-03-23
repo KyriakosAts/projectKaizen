@@ -151,7 +151,14 @@ pub async fn get_app_config(
 }
 
 /// Connect to an existing spreadsheet the user created and shared manually.
-/// Validates the connection, writes headers if tabs are missing, saves config.
+/// Validates the connection, creates any missing tabs, writes headers if needed, saves config.
+/// 
+/// Flow:
+/// 1. Verify we can access the spreadsheet
+/// 2. Get all existing tabs
+/// 3. Create any missing tabs from ALL_TABS
+/// 4. Write headers to data tabs (skip config-blob tabs)
+/// 5. Save config and initialize app state
 #[tauri::command]
 pub async fn connect_spreadsheet(
     app: tauri::AppHandle,
@@ -170,27 +177,40 @@ pub async fn connect_spreadsheet(
     let drive = DriveClient::new(auth.clone());
     let sheets = SheetsClient::new(spreadsheet_id.clone(), auth.clone());
 
-    // Just verify we can reach the spreadsheet metadata — no tab checks
-    let url = format!("https://sheets.googleapis.com/v4/spreadsheets/{}?fields=spreadsheetId", spreadsheet_id);
-    let token = auth.access_token().await?;
-    let http = reqwest::Client::new();
-    let resp = http.get(&url).bearer_auth(&token).send().await
-        .map_err(|e| format!("Cannot reach spreadsheet: {}", e))?;
-    if !resp.status().is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Cannot access spreadsheet ({}). Make sure you shared it with the service account as Editor.\n\n{}", spreadsheet_id, text));
+    // Step 1: Verify we can reach the spreadsheet and get existing tabs
+    let existing_tabs = sheets.verify_access().await?;
+    let existing_set: std::collections::HashSet<String> = existing_tabs.into_iter().collect();
+
+    // Step 2: Create any missing tabs
+    for tab_name in ALL_TABS {
+        if !existing_set.contains(*tab_name) {
+            eprintln!("Creating missing sheet tab: {}", tab_name);
+            sheets.add_sheet(tab_name).await?;
+        }
     }
 
-    // Persist config
+    // Step 3: Write headers to all data tabs (skip config-blob tabs)
+    for tab in ALL_TABS {
+        let is_config_tab = *tab == SHEET_CONFIG_SVC
+            || *tab == SHEET_CONFIG_SCH
+            || *tab == SHEET_CONFIG_INST;
+        if !is_config_tab {
+            let headers = headers_for(tab);
+            sheets.write_headers(tab, &headers).await?;
+        }
+    }
+
+    // Step 4: Persist config
     let config_path = config_file_path(&app);
     let mut config = load_config(&config_path);
     config.spreadsheet_id = spreadsheet_id.clone();
     save_config(&config_path, &config)?;
 
-    // Populate app state
+    // Step 5: Populate app state
+    let sheets_initialized = SheetsClient::new(config.spreadsheet_id.clone(), auth.clone());
     {
         let mut auth_guard   = state.auth.lock().await;   *auth_guard   = Some(auth.clone());
-        let mut sheets_guard = state.sheets.lock().await; *sheets_guard = Some(sheets);
+        let mut sheets_guard = state.sheets.lock().await; *sheets_guard = Some(sheets_initialized);
         let mut drive_guard  = state.drive.lock().await;  *drive_guard  = Some(drive);
         let mut config_guard = state.config.lock().await; *config_guard = config.clone();
     }

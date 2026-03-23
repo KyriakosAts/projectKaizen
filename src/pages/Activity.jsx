@@ -12,7 +12,7 @@ import { useSchedule }  from '../contexts/ScheduleContext'
 import Avatar           from '../components/ui/Avatar'
 import Button           from '../components/ui/Button'
 import { PageLoader }   from '../components/ui/LoadingSpinner'
-import { currentYear, formatMonth, currentMonthStr, hexToRgba, toDate, BELT_COLORS, BELT_LABELS } from '../utils/helpers'
+import { currentYear, formatMonth, currentMonthStr, hexToRgba, toDate, BELT_COLORS, BELT_LABELS, parseLocalDate } from '../utils/helpers'
 import AttendanceModal  from '../components/AttendanceModal'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ function MonthlyView({
   const beltPromoMap = useMemo(() => {
     const map = {}
     ;(beltHistory ?? []).forEach(b => {
-      const month = format(new Date(b.promotedAt), 'yyyy-MM')
+      const month = format(parseLocalDate(b.promotedAt), 'yyyy-MM')
       if (!map[b.memberId]) map[b.memberId] = {}
       if (!map[b.memberId][month]) map[b.memberId][month] = []
       map[b.memberId][month].push(b)

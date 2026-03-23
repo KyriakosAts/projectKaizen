@@ -13,12 +13,14 @@ const ServicesContext = createContext(null)
 export function ServicesProvider({ children }) {
   const [services, setServices] = useState(DEFAULT_SERVICES)
   const [initialized, setInitialized] = useState(false)
+  const [initError, setInitError] = useState(null)
   const ref = useRef(services)
   ref.current = services
 
   // On mount: load from Google Sheets
   useEffect(() => {
     async function init() {
+      setInitError(null)
       try {
         const json = await getServicesConfig()
         if (json) {
@@ -28,13 +30,29 @@ export function ServicesProvider({ children }) {
             setServices(loaded)
             ref.current = loaded
           } else {
-            await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
+            // Empty services array or missing property — initialize with defaults
+            try {
+              await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
+            } catch (saveErr) {
+              console.error('[ServicesContext] Failed to save default services:', saveErr)
+              setInitError(`Failed to save services configuration: ${typeof saveErr === 'string' ? saveErr : saveErr.message}`)
+            }
           }
         } else {
-          await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
+          // No existing config — create new one with defaults
+          try {
+            await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
+          } catch (saveErr) {
+            console.error('[ServicesContext] Failed to save default services on first init:', saveErr)
+            setInitError(`Failed to initialize services configuration: ${typeof saveErr === 'string' ? saveErr : saveErr.message}`)
+          }
         }
-      } catch {
-        // Fall back to defaults silently
+      } catch (err) {
+        // Load failed — log error and use defaults
+        const msg = typeof err === 'string' ? err : err.message ?? 'Unknown error'
+        console.error('[ServicesContext] Failed to load services from Sheets:', msg, err)
+        setInitError(msg)
+        // Services stays as DEFAULT_SERVICES from initial useState
       }
       setInitialized(true)
     }
@@ -45,6 +63,11 @@ export function ServicesProvider({ children }) {
   useEffect(() => {
     if (!initialized) return
     saveServicesConfig(JSON.stringify({ services }))
+      .catch(err => {
+        const msg = typeof err === 'string' ? err : err.message ?? 'Unknown error'
+        console.error('[ServicesContext] Failed to persist services to Sheets:', msg)
+        // Don't override services state on save failure; in-memory changes remain
+      })
   }, [services, initialized])
 
   function setAndSync(updater) {
@@ -75,7 +98,7 @@ export function ServicesProvider({ children }) {
   }, [getService])
 
   return (
-    <ServicesContext.Provider value={{ services, getService, getMemberFee, updateService, addService }}>
+    <ServicesContext.Provider value={{ services, getService, getMemberFee, updateService, addService, initialized, initError }}>
       {children}
     </ServicesContext.Provider>
   )

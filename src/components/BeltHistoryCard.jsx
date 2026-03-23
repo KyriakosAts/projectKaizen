@@ -4,7 +4,7 @@ import { Plus, Award, AlignLeft, LayoutGrid } from 'lucide-react'
 
 import { useSchedule } from '../contexts/ScheduleContext'
 import Card from './ui/Card'
-import { BELT_COLORS, BELT_LABELS, BELTS, CATEGORY_LABELS } from '../utils/helpers'
+import { BELT_COLORS, BELT_LABELS, BELTS, CATEGORY_LABELS, parseLocalDate, formatLocalDate } from '../utils/helpers'
 
 // ── Japanese rank labels ───────────────────────────────────────────────────────
 const JUDO_BELT_JP = {
@@ -63,7 +63,7 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
     const raw = beltHistory
       .filter(b => b.memberId === member.id)
       .sort((a, b) => {
-        const d = new Date(a.promotedAt) - new Date(b.promotedAt)
+        const d = parseLocalDate(a.promotedAt) - parseLocalDate(b.promotedAt)
         if (d !== 0) return d
         // Tiebreaker: createdAt (older record = earlier in history)
         return new Date(a.createdAt ?? 0) - new Date(b.createdAt ?? 0)
@@ -71,8 +71,8 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
 
     const now = new Date()
     return raw.map((entry, idx) => {
-      const startDate   = new Date(entry.promotedAt)
-      const endDate     = idx < raw.length - 1 ? new Date(raw[idx + 1].promotedAt) : now
+      const startDate   = parseLocalDate(entry.promotedAt)
+      const endDate     = idx < raw.length - 1 ? parseLocalDate(raw[idx + 1].promotedAt) : now
       const totalMonths = differenceInMonths(endDate, startDate)
       const totalDays   = differenceInDays(endDate, startDate)
       const years  = Math.floor(totalMonths / 12)
@@ -142,7 +142,7 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
     try {
       await addBeltPromotion(member.id, {
         ...form,
-        promotedAt: new Date(form.promotedAt),
+        promotedAt: formatLocalDate(form.promotedAt),
       })
       setShowForm(false)
       setForm({ category: '', fromBelt: '', toBelt: '', promotedAt: format(new Date(), 'yyyy-MM-dd'), notes: '' })
@@ -155,7 +155,7 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
   function renderCompactEntry(entry, idx, entries, catColor) {
     const jpFrom = getBeltJP(entry.category, entry.fromBelt)
     const jpTo   = getBeltJP(entry.category, entry.toBelt)
-    const promotedDate  = entry.promotedAt instanceof Date ? entry.promotedAt : new Date(entry.promotedAt)
+    const promotedDate  = typeof entry.promotedAt === 'string' ? parseLocalDate(entry.promotedAt) : entry.promotedAt
     const durationLabel = formatDuration(entry.totalMonths, entry.totalDays)
     return (
       <div key={entry.id} className="flex gap-2.5 pb-3 last:pb-0">
@@ -407,7 +407,7 @@ export default function BeltHistoryCard({ member, beltHistory, addBeltPromotion,
             {filteredHistory.map((entry, idx) => {
               const jpFrom = getBeltJP(entry.category, entry.fromBelt)
               const jpTo   = getBeltJP(entry.category, entry.toBelt)
-              const promotedDate  = entry.promotedAt instanceof Date ? entry.promotedAt : new Date(entry.promotedAt)
+              const promotedDate  = typeof entry.promotedAt === 'string' ? parseLocalDate(entry.promotedAt) : entry.promotedAt
               const durationLabel = formatDuration(entry.totalMonths, entry.totalDays)
               const svc      = services?.find(s => s.id === entry.category)
               const catColor = svc?.color ?? '#94a3b8'

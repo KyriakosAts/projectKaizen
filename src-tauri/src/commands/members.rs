@@ -89,16 +89,17 @@ pub async fn update_member(
     data: MemberInput,
 ) -> Result<(), String> {
     let sheets = get_sheets(&state).await?;
-    let row_idx = sheets.find_row_by_id(SHEET_MEMBERS, &id).await?
+    
+    // OPTIMIZATION: find_row_with_data returns both the row index and existing data
+    // in a single API call, avoiding duplicate get_all_rows calls
+    let (row_idx, existing_row) = sheets.find_row_with_data(SHEET_MEMBERS, &id).await?
         .ok_or_else(|| format!("Member '{}' not found", id))?;
 
     let now = Utc::now().to_rfc3339();
 
-    // Read existing rows to preserve createdAt
-    let rows = sheets.get_all_rows(SHEET_MEMBERS).await?;
-    let created_at = rows
-        .get((row_idx - 1) as usize)
-        .and_then(|r| r.get(11))
+    // Preserve the original creation timestamp from existing data (column 11)
+    let created_at = existing_row
+        .get(11)
         .cloned()
         .unwrap_or_else(|| now.clone());
 
@@ -129,6 +130,10 @@ pub async fn delete_member_cascade(
 ) -> Result<(), String> {
     let sheets = get_sheets(&state).await?;
 
+    // OPTIMIZATION: get_all_sheet_ids() fetches ALL sheet metadata in 1 API call
+    // instead of calling get_sheet_id() 6 times (was making 6 separate requests)
+    let all_sheet_ids = sheets.get_all_sheet_ids().await?;
+
     // Delete all related rows in related sheets (memberId is column B = index 1)
     let related: &[&str] = &[
         SHEET_PAYMENTS,
@@ -139,7 +144,7 @@ pub async fn delete_member_cascade(
     ];
 
     for sheet in related {
-        let sheet_id = sheets.get_sheet_id(sheet).await.unwrap_or(0);
+        let sheet_id = all_sheet_ids.get(*sheet).copied().unwrap_or(0);
         let indices  = sheets.find_rows_by_member_id(sheet, &id).await?;
         // Delete in reverse order so earlier indices remain valid
         for &row_idx in indices.iter().rev() {
@@ -148,7 +153,7 @@ pub async fn delete_member_cascade(
     }
 
     // Delete the member row itself
-    let member_sheet_id = sheets.get_sheet_id(SHEET_MEMBERS).await.unwrap_or(0);
+    let member_sheet_id = all_sheet_ids.get(SHEET_MEMBERS).copied().unwrap_or(0);
     let row_idx = sheets.find_row_by_id(SHEET_MEMBERS, &id).await?
         .ok_or_else(|| format!("Member '{}' not found", id))?;
     sheets.delete_row(SHEET_MEMBERS, row_idx, member_sheet_id).await?;

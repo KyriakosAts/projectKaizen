@@ -461,6 +461,39 @@ impl SheetsClient {
             .ok_or_else(|| format!("Sheet '{}' not found", sheet_name))
     }
 
+    /// Get all sheet IDs in a single API call, returning a map of name → id.
+    /// Much more efficient than calling get_sheet_id multiple times.
+    pub async fn get_all_sheet_ids(&self) -> Result<std::collections::HashMap<String, u32>, String> {
+        let url = format!(
+            "{}/{}?fields=sheets.properties",
+            SHEETS_BASE, self.spreadsheet_id
+        );
+
+        let resp = self.http
+            .get(&url)
+            .bearer_auth(&self.bearer().await?)
+            .send()
+            .await
+            .map_err(|e| format!("get_all_sheet_ids request failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("get_all_sheet_ids error {}: {}", status, text));
+        }
+
+        let data: SheetListResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("get_all_sheet_ids parse error: {}", e))?;
+
+        let mut map = std::collections::HashMap::new();
+        for sheet_info in data.sheets.unwrap_or_default() {
+            map.insert(sheet_info.properties.title, sheet_info.properties.sheet_id);
+        }
+        Ok(map)
+    }
+
     // ─── FIND ROW BY ID ──────────────────────────────────────────────────────
 
     /// Find the 1-based data row index of a row whose column A matches `id`.
@@ -494,6 +527,23 @@ impl SheetsClient {
             .map(|(idx, _)| (idx + 1) as u32)
             .collect();
         Ok(indices)
+    }
+
+    /// Find a row by ID and return both its 1-based index and full row data in one pass.
+    /// Optimization: avoids calling get_all_rows twice when you need both pieces of data.
+    /// Returns (row_index, row_data) or None if not found.
+    pub async fn find_row_with_data(
+        &self,
+        sheet: &str,
+        id: &str,
+    ) -> Result<Option<(u32, Vec<String>)>, String> {
+        let rows = self.get_all_rows(sheet).await?;
+        for (idx, row) in rows.iter().enumerate() {
+            if row.first().map(|s| s.as_str()) == Some(id) {
+                return Ok(Some(((idx + 1) as u32, row.clone())));
+            }
+        }
+        Ok(None)
     }
 
     // ─── WRITE / READ SINGLE CELL ────────────────────────────────────────────

@@ -1,5 +1,37 @@
 import { format, parse } from 'date-fns'
 
+// ─── Date utilities ───────────────────────────────────────────────────────────
+// CRITICAL: Date-only fields (YYYY-MM-DD) must always parse as the LOCAL date,
+// not UTC, to avoid timezone shifts. This is especially important for dates like
+// promotedAt, joinDate, service_dates — they represent calendar days, not moments.
+
+/**
+ * Parse a date-only string (YYYY-MM-DD) as the local date, not UTC.
+ * IMPORTANT: Use this for date-only fields; do NOT use new Date(string).
+ * 
+ * Example: "2025-03-15" → March 15 in user's timezone, not UTC
+ */
+export const parseLocalDate = (dateString) => {
+  if (!dateString || typeof dateString !== 'string') return new Date('invalid')
+  // Parse as YYYY-MM-DD, then create a Date that represents that local date
+  const parts = dateString.split('-')
+  if (parts.length !== 3) return new Date('invalid')
+  const [year, month, day] = parts.map(Number)
+  return new Date(year, month - 1, day) // month is 0-indexed in Date constructor
+}
+
+/**
+ * Format a date/string as YYYY-MM-DD (local timezone, no time component).
+ * Suitable for date-only fields (promotedAt, joinDate, etc).
+ * 
+ * Example: new Date(2025, 2, 15) → "2025-03-15"
+ */
+export const formatLocalDate = (date) => {
+  const d = typeof date === 'string' ? parseLocalDate(date) : date
+  if (isNaN(d)) return ''
+  return format(d, 'yyyy-MM-dd')
+}
+
 // ─── Category ─────────────────────────────────────────────────────────────────
 export const CATEGORY_LABELS = {
   judo:     'Judo',
