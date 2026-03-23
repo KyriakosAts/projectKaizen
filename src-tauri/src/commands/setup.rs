@@ -167,20 +167,15 @@ pub async fn connect_spreadsheet(
     let drive = DriveClient::new(auth.clone());
     let sheets = SheetsClient::new(spreadsheet_id.clone(), auth.clone());
 
-    // Verify access and get list of existing tabs
-    let existing_tabs = sheets.verify_access().await?;
-
-    // Create any missing tabs then write headers
-    for tab in ALL_TABS {
-        let is_config_tab = *tab == SHEET_CONFIG_SVC || *tab == SHEET_CONFIG_SCH || *tab == SHEET_CONFIG_INST;
-        if !existing_tabs.contains(&tab.to_string()) {
-            sheets.add_sheet(tab).await
-                .unwrap_or_else(|e| eprintln!("Warning: could not create tab {}: {}", tab, e));
-        }
-        if !is_config_tab {
-            sheets.write_headers(tab, &headers_for(tab)).await
-                .unwrap_or_else(|e| eprintln!("Warning: could not write headers to {}: {}", tab, e));
-        }
+    // Just verify we can reach the spreadsheet metadata — no tab checks
+    let url = format!("https://sheets.googleapis.com/v4/spreadsheets/{}?fields=spreadsheetId", spreadsheet_id);
+    let token = auth.access_token().await?;
+    let http = reqwest::Client::new();
+    let resp = http.get(&url).bearer_auth(&token).send().await
+        .map_err(|e| format!("Cannot reach spreadsheet: {}", e))?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("Cannot access spreadsheet ({}). Make sure you shared it with the service account as Editor.\n\n{}", spreadsheet_id, text));
     }
 
     // Persist config

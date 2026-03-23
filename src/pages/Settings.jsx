@@ -777,10 +777,15 @@ function DatabaseSection() {
       </div>
 
       {/* Instructions */}
-      <ol className="text-xs text-gray-500 space-y-1 mb-4 list-decimal list-inside leading-relaxed">
-        <li>Go to <strong className="text-gray-700">sheets.google.com</strong> → create a new blank spreadsheet → name it <strong className="text-gray-700">Dojo Patras</strong></li>
+      <ol className="text-xs text-gray-500 space-y-1.5 mb-4 list-decimal list-inside leading-relaxed">
+        <li>Go to <strong className="text-gray-700">sheets.google.com</strong> → create a new blank spreadsheet</li>
+        <li>Create these tabs (rename Sheet1, add the rest): <br/>
+          <code className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 leading-loose">
+            Members · Payments · Attendance · BeltHistory · MemberNotes · Comments · Config_Services · Config_Schedule · Config_Instructors · Logs
+          </code>
+        </li>
         <li>Click <strong className="text-gray-700">Share</strong> → paste the email above → set to <strong className="text-gray-700">Editor</strong> → Send</li>
-        <li>Copy the URL or spreadsheet ID and paste it below</li>
+        <li>Paste the spreadsheet URL or ID below and click Connect</li>
       </ol>
 
       {/* Sheet ID input */}
