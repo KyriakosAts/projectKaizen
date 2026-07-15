@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
-import { getScheduleConfig, saveScheduleConfig } from '../services/sheetsService'
+import { getScheduleConfig, saveScheduleConfig } from '../services/dataService'
 
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 export const DAY_LABELS = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' }
@@ -55,10 +55,13 @@ export function ScheduleProvider({ children }) {
 
   function debouncedSave(nextClasses, nextEvents) {
     clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => saveScheduleConfig(JSON.stringify({ classes: nextClasses, events: nextEvents })), 500)
+    saveTimer.current = setTimeout(() => {
+      saveScheduleConfig(JSON.stringify({ classes: nextClasses, events: nextEvents }))
+        .catch(err => console.error('[ScheduleContext] Failed to save schedule config:', err))
+    }, 500)
   }
 
-  // On mount: load from Google Sheets
+  // On mount: load from the database
   useEffect(() => {
     async function init() {
       try {
@@ -74,10 +77,12 @@ export function ScheduleProvider({ children }) {
         } else {
           await saveScheduleConfig(JSON.stringify({ classes: DEFAULT_CLASSES, events: [] }))
         }
-      } catch {
-        // Fall back to defaults silently
+        // Only enable autosave after a successful load — if the load failed we
+        // must never save defaults over the stored config
+        setInitialized(true)
+      } catch (err) {
+        console.error('[ScheduleContext] Failed to load schedule config — autosave disabled to protect stored data:', err)
       }
-      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

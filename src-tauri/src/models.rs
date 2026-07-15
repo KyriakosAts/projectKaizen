@@ -29,7 +29,7 @@ pub struct Payment {
     pub id: String,
     pub member_id: String,
     pub month: String,         // "2026-03"
-    pub amount: String,        // number stored as string for Sheets compatibility
+    pub amount: String,
     pub status: String,        // "paid" | "unpaid"
     pub paid_at: Option<String>,
     pub note: Option<String>,
@@ -84,15 +84,6 @@ pub struct Comment {
     pub updated_at: String,
 }
 
-// ─── AppConfig ─────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct AppConfig {
-    pub spreadsheet_id: String,
-    pub backup_folder_id: String,
-    pub last_backup: Option<String>,
-}
-
 // ─── Input types (for adding new records) ──────────────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,39 +131,56 @@ pub struct BeltInput {
     pub notes: Option<String>,
 }
 
-// ─── SetupResult ───────────────────────────────────────────────────────────────
+// ─── App settings / setup ──────────────────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    pub db_path: String,
+    pub mirror_path: String,
+    pub backup_folder: String,
+    pub last_backup: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupResult {
-    pub spreadsheet_id: String,
-    pub backup_folder_id: String,
-    pub created: bool,  // true = newly created, false = already existed
+    pub db_path: String,
+    pub mirror_path: String,
+    pub backup_folder: String,
+    pub created: bool,  // true = database newly created on this launch
 }
 
 // ─── BackupInfo ────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupInfo {
-    pub name: String,        // "2026-03-23.json"
-    pub date: String,        // "2026-03-23"
-    pub drive_file_id: Option<String>,
+    pub name: String,        // "dojo-backup-2026-07-15_14-30-00.json"
+    pub date: String,        // "2026-07-15 14:30:00"
     pub local_path: Option<String>,
     pub size_bytes: Option<u64>,
 }
 
-// ─── Sheet tab name constants ───────────────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreResult {
+    pub members: usize,
+    pub payments: usize,
+    pub attendance: usize,
+    pub belt_history: usize,
+    pub member_notes: usize,
+    pub comments: usize,
+    pub safety_backup: String, // name of the pre-restore snapshot taken automatically
+}
+
+// ─── Excel mirror sheet names + headers ────────────────────────────────────────
 pub const SHEET_MEMBERS:      &str = "Members";
 pub const SHEET_PAYMENTS:     &str = "Payments";
 pub const SHEET_ATTENDANCE:   &str = "Attendance";
 pub const SHEET_BELT_HISTORY: &str = "BeltHistory";
 pub const SHEET_MEMBER_NOTES: &str = "MemberNotes";
 pub const SHEET_COMMENTS:     &str = "Comments";
-pub const SHEET_CONFIG_SVC:   &str = "Config_Services";
-pub const SHEET_CONFIG_SCH:   &str = "Config_Schedule";
-pub const SHEET_CONFIG_INST:  &str = "Config_Instructors";
-pub const SHEET_LOGS:         &str = "Logs";
+pub const SHEET_CONFIG:       &str = "Config";
 
-// ─── Sheet headers (column order must match) ───────────────────────────────────
 pub fn headers_for(sheet: &str) -> Vec<&'static str> {
     match sheet {
         SHEET_MEMBERS      => vec!["id","name","phone","email","categories","belts","serviceDates","joinDate","status","customFee","notes","createdAt","updatedAt"],
@@ -181,7 +189,7 @@ pub fn headers_for(sheet: &str) -> Vec<&'static str> {
         SHEET_BELT_HISTORY => vec!["id","memberId","category","fromBelt","toBelt","promotedAt","notes","createdAt"],
         SHEET_MEMBER_NOTES => vec!["id","memberId","text","createdAt"],
         SHEET_COMMENTS     => vec!["id","memberId","month","text","updatedAt"],
-        SHEET_LOGS         => vec!["timestamp","action","collection","recordId","details"],
+        SHEET_CONFIG       => vec!["key","json"],
         _                  => vec!["value"],
     }
 }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
-import { getInstructorsConfig, saveInstructorsConfig } from '../services/sheetsService'
+import { getInstructorsConfig, saveInstructorsConfig } from '../services/dataService'
 
 const InstructorsContext = createContext(null)
 
@@ -9,7 +9,7 @@ export function InstructorsProvider({ children }) {
   const ref = useRef(instructors)
   ref.current = instructors
 
-  // On mount: load from Google Sheets
+  // On mount: load from the database
   useEffect(() => {
     async function init() {
       try {
@@ -24,18 +24,21 @@ export function InstructorsProvider({ children }) {
         } else {
           await saveInstructorsConfig(JSON.stringify({ instructors: [] }))
         }
-      } catch {
-        // Fall back to empty list silently
+        // Only enable autosave after a successful load — if the load failed we
+        // must never save defaults over the stored config
+        setInitialized(true)
+      } catch (err) {
+        console.error('[InstructorsContext] Failed to load instructors config — autosave disabled to protect stored data:', err)
       }
-      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save to Google Sheets whenever instructors change (after initial load)
+  // Save to the database whenever instructors change (after initial load)
   useEffect(() => {
     if (!initialized) return
     saveInstructorsConfig(JSON.stringify({ instructors }))
+      .catch(err => console.error('[InstructorsContext] Failed to save instructors config:', err))
   }, [instructors, initialized])
 
   function setAndSync(updater) {

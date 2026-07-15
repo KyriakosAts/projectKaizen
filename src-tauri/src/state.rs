@@ -1,32 +1,45 @@
-use tokio::sync::Mutex;
-use crate::{auth::AuthClient, sheets::SheetsClient, drive::DriveClient, models::AppConfig};
+use rusqlite::Connection;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use crate::mirror::MirrorHandle;
 
 pub struct AppState {
-    pub auth:   Mutex<Option<AuthClient>>,
-    pub sheets: Mutex<Option<SheetsClient>>,
-    pub drive:  Mutex<Option<DriveClient>>,
-    pub config: Mutex<AppConfig>,
+    pub db: Mutex<Option<Connection>>,
+    pub db_path: Mutex<Option<PathBuf>>,
+    pub mirror: MirrorHandle,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
-            auth:   Mutex::new(None),
-            sheets: Mutex::new(None),
-            drive:  Mutex::new(None),
-            config: Mutex::new(AppConfig::default()),
+            db: Mutex::new(None),
+            db_path: Mutex::new(None),
+            mirror: MirrorHandle::new(),
         }
     }
 }
 
-/// Helper: get initialized SheetsClient or error.
-pub async fn get_sheets(state: &AppState) -> Result<SheetsClient, String> {
-    let guard = state.sheets.lock().await;
-    guard.clone().ok_or_else(|| "Google Sheets not initialized. Run setup first.".to_string())
+/// Run a closure against the open database connection.
+pub fn with_db<T>(
+    state: &AppState,
+    f: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let guard = state.db.lock().map_err(|_| "Database lock poisoned".to_string())?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| "Database not initialized. Restart the app.".to_string())?;
+    f(conn)
 }
 
-/// Helper: get initialized DriveClient or error.
-pub async fn get_drive(state: &AppState) -> Result<DriveClient, String> {
-    let guard = state.drive.lock().await;
-    guard.clone().ok_or_else(|| "Google Drive not initialized. Run setup first.".to_string())
+/// Same as `with_db` but with a mutable connection (needed for transactions).
+pub fn with_db_mut<T>(
+    state: &AppState,
+    f: impl FnOnce(&mut Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut guard = state.db.lock().map_err(|_| "Database lock poisoned".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "Database not initialized. Restart the app.".to_string())?;
+    f(conn)
 }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
-import { getServicesConfig, saveServicesConfig } from '../services/sheetsService'
+import { getServicesConfig, saveServicesConfig } from '../services/dataService'
 
 export const DEFAULT_SERVICES = [
   { id: 'judo',     name: 'Judo',      description: 'Traditional Japanese martial art focusing on throws and ground work.', color: '#3b82f6', monthlyFee: 40, active: true, usesBelts: true },
@@ -16,7 +16,7 @@ export function ServicesProvider({ children }) {
   const ref = useRef(services)
   ref.current = services
 
-  // On mount: load from Google Sheets
+  // On mount: load from the database
   useEffect(() => {
     async function init() {
       try {
@@ -33,18 +33,21 @@ export function ServicesProvider({ children }) {
         } else {
           await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
         }
-      } catch {
-        // Fall back to defaults silently
+        // Only enable autosave after a successful load — if the load failed we
+        // must never save defaults over the stored config
+        setInitialized(true)
+      } catch (err) {
+        console.error('[ServicesContext] Failed to load services config — autosave disabled to protect stored data:', err)
       }
-      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save to Google Sheets whenever services change (after initial load)
+  // Save to the database whenever services change (after initial load)
   useEffect(() => {
     if (!initialized) return
     saveServicesConfig(JSON.stringify({ services }))
+      .catch(err => console.error('[ServicesContext] Failed to save services config:', err))
   }, [services, initialized])
 
   function setAndSync(updater) {

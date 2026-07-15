@@ -1,9 +1,9 @@
 /**
- * sheetsService.js
+ * dataService.js
  *
  * Unified data service — automatically picks the right backend:
- *   • Tauri desktop app  →  Rust commands → Google Sheets API
- *   • Browser / dev mode →  localStorage  (full CRUD, no network needed)
+ *   • Tauri desktop app  →  Rust commands → local SQLite database
+ *   • Browser / dev mode →  localStorage  (full CRUD, no native backend needed)
  *
  * Every export has the exact same signature in both modes, so DataContext
  * never needs to know which backend is active.
@@ -42,11 +42,10 @@ const ls = {
 
 // Command handlers for localStorage mode — mirror every Tauri command exactly
 const LOCAL = {
-  // ── Setup ──────────────────────────────────────────────────────────────────
-  setup_spreadsheet:       ()   => null,
-  get_app_config:          ()   => ({ spreadsheetId: null, backupFolderId: null, lastBackup: null }),
-  connect_spreadsheet:     ()   => ({ spreadsheetId: 'local', backupFolderId: '', created: false }),
-  get_service_account_email: () => 'local-mode@localStorage',
+  // ── Setup / settings ───────────────────────────────────────────────────────
+  setup_database:  () => ({ dbPath: 'localStorage', mirrorPath: '', backupFolder: '', created: false }),
+  get_app_config:  () => ({ dbPath: 'localStorage', mirrorPath: '', backupFolder: '', lastBackup: null }),
+  set_data_folder: () => ({ dbPath: 'localStorage', mirrorPath: '', backupFolder: '', lastBackup: null }),
 
   // ── Members ────────────────────────────────────────────────────────────────
   get_members: () => ls.get(LS.members, []),
@@ -165,9 +164,10 @@ const LOCAL = {
   get_instructors_config: ()       => ls.getRaw(LS.instructorsConfig),
   save_instructors_config:({ json }) => ls.setRaw(LS.instructorsConfig, json),
 
-  // ── Backup (no-op in local mode) ───────────────────────────────────────────
-  create_backup: () => null,
-  list_backups:  () => [],
+  // ── Backup / restore (no-op in local mode) ─────────────────────────────────
+  create_backup:  () => null,
+  list_backups:   () => [],
+  restore_backup: () => { throw new Error('Backups are only available in the desktop app') },
 }
 
 // ── Unified dispatcher ────────────────────────────────────────────────────────
@@ -179,17 +179,15 @@ async function call(cmd, args = {}) {
     return invoke(cmd, args)
   }
   const handler = LOCAL[cmd]
-  if (!handler) return Promise.reject(new Error(`[sheetsService] Unknown local command: ${cmd}`))
+  if (!handler) return Promise.reject(new Error(`[dataService] Unknown local command: ${cmd}`))
   return Promise.resolve(handler(args))
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
-// (identical signatures to the old Tauri-only version)
 
-export const setupSpreadsheet          = ()    => call('setup_spreadsheet')
+export const setupDatabase             = ()    => call('setup_database')
 export const getAppConfig              = ()    => call('get_app_config')
-export const connectSpreadsheet        = (id)  => call('connect_spreadsheet', { spreadsheetId: id })
-export const getServiceAccountEmail    = ()    => call('get_service_account_email')
+export const setDataFolder             = (path) => call('set_data_folder', { path })
 
 export const getMembers           = ()                    => call('get_members')
 export const addMember            = (data)                => call('add_member',             { data })
@@ -224,3 +222,4 @@ export const saveInstructorsConfig= (json)                => call('save_instruct
 
 export const createBackup         = ()                    => call('create_backup')
 export const listBackups          = ()                    => call('list_backups')
+export const restoreBackup        = (name)                => call('restore_backup',         { name })

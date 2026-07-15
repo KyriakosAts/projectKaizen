@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
-import { FileSpreadsheet, Download, Users, CreditCard, Activity, MessageSquare, FileJson, History, RotateCcw } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { FileSpreadsheet, Download, Users, CreditCard, Activity, MessageSquare, FileJson, History, RotateCcw, HardDriveDownload, RefreshCw } from 'lucide-react'
 import { useData } from '../contexts/DataContext'
 import { useServices } from '../contexts/ServicesContext'
 import { useSchedule } from '../contexts/ScheduleContext'
-import { exportToExcel, exportToJSON, getAutoBackups } from '../utils/export'
+import * as db from '../services/dataService'
+import { exportToExcel, exportToJSON } from '../utils/export'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import { CATEGORY_LABELS, CATEGORIES, CATEGORY_COLORS } from '../utils/helpers'
@@ -27,7 +28,7 @@ function PreviewStat({ icon: Icon, label, count, color }) {
 }
 
 export default function ExportModal({ onClose }) {
-  const { members, payments, comments, attendance, beltHistory, memberNotes } = useData()
+  const { members, payments, comments, attendance, beltHistory, memberNotes, reload } = useData()
   const { services }                    = useServices()
   const { classes, events }             = useSchedule()
   const [tab,           setTab]         = useState('excel') // 'excel' | 'json' | 'backups'
@@ -35,8 +36,46 @@ export default function ExportModal({ onClose }) {
   const [statusFilter,   setStatusFilter]   = useState('')
   const [exporting,      setExporting]      = useState(false)
 
-  // Auto-backups list
-  const autoBackups = useMemo(() => getAutoBackups(), [])
+  // Backup snapshots (files in the backup folder, newest first)
+  const [backups,       setBackups]       = useState([])
+  const [backupBusy,    setBackupBusy]    = useState(false)
+  const [restoringName, setRestoringName] = useState(null)
+  const [backupMsg,     setBackupMsg]     = useState(null) // { ok: bool, text: string }
+
+  const refreshBackups = () => db.listBackups().then(setBackups).catch(() => setBackups([]))
+  useEffect(() => { refreshBackups() }, [])
+
+  async function handleBackupNow() {
+    setBackupBusy(true); setBackupMsg(null)
+    try {
+      const info = await db.createBackup()
+      setBackupMsg({ ok: true, text: info ? `Backup saved: ${info.name}` : 'Backups are only available in the desktop app.' })
+      refreshBackups()
+    } catch (e) {
+      setBackupMsg({ ok: false, text: typeof e === 'string' ? e : e.message ?? 'Backup failed' })
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function handleRestore(name) {
+    const sure = window.confirm(
+      `Restore "${name}"?\n\nAll current data will be replaced with this snapshot. ` +
+      `A safety backup of the current data is taken automatically first, so you can undo this.`
+    )
+    if (!sure) return
+    setRestoringName(name); setBackupMsg(null)
+    try {
+      const r = await db.restoreBackup(name)
+      setBackupMsg({ ok: true, text: `Restored ${r.members} members, ${r.payments} payments, ${r.attendance} attendance records. Safety snapshot: ${r.safetyBackup}` })
+      await reload()
+      refreshBackups()
+    } catch (e) {
+      setBackupMsg({ ok: false, text: typeof e === 'string' ? e : e.message ?? 'Restore failed' })
+    } finally {
+      setRestoringName(null)
+    }
+  }
 
   // Live preview stats based on current filter selection
   const preview = useMemo(() => {
@@ -77,7 +116,7 @@ export default function ExportModal({ onClose }) {
   const tabs = [
     { id: 'excel',   label: '📊 Excel',   desc: 'Spreadsheet export' },
     { id: 'json',    label: '{ } JSON',   desc: 'Full backup' },
-    { id: 'backups', label: '🕐 Backups', desc: `${autoBackups.length} saved` },
+    { id: 'backups', label: '🕐 Backups', desc: `${backups.length} saved` },
   ]
 
   return (
@@ -234,33 +273,52 @@ export default function ExportModal({ onClose }) {
         <div className="space-y-3">
           <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
             <p className="text-xs text-amber-700">
-              <strong>Auto-backups</strong> are saved locally each day the app loads. The 3 most recent are kept.
-              For a permanent off-device backup, use the JSON export above.
+              <strong>Snapshots</strong> are saved to the backup folder automatically on the first launch of each day
+              (the 30 most recent are kept). You can take one manually, or restore any snapshot — a safety copy of the
+              current data is always taken first.
             </p>
           </div>
-          {autoBackups.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-4">No auto-backups yet. Backups are created automatically when the app loads each day.</p>
+
+          <button
+            onClick={handleBackupNow}
+            disabled={backupBusy}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 text-white text-xs font-semibold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          >
+            {backupBusy ? <RefreshCw size={13} className="animate-spin" /> : <HardDriveDownload size={13} />}
+            {backupBusy ? 'Backing up…' : 'Backup Now'}
+          </button>
+
+          {backupMsg && (
+            <div className={`p-2.5 rounded-xl text-xs ${backupMsg.ok ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-red-50 text-red-700 border border-red-100'}`}>
+              {backupMsg.text}
+            </div>
+          )}
+
+          {backups.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">No snapshots yet. One is created automatically each day the app starts.</p>
           ) : (
-            <div className="space-y-2">
-              {autoBackups.map(b => (
-                <div key={b.date} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {backups.map(b => (
+                <div key={b.name} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                   <History size={14} className="text-gray-400 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-gray-700">{b.date}</p>
+                    <p className="text-xs font-semibold text-gray-700 truncate" title={b.name}>{b.name}</p>
                     <p className="text-[11px] text-gray-400">
-                      {b.savedAt ? new Date(b.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                      {' · '}
-                      {b.size > 0 ? `${(b.size / 1024).toFixed(1)} KB` : ''}
+                      {b.date}{b.sizeBytes ? ` · ${(b.sizeBytes / 1024).toFixed(1)} KB` : ''}
                     </p>
                   </div>
-                  <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">saved</span>
+                  <button
+                    onClick={() => handleRestore(b.name)}
+                    disabled={restoringName !== null}
+                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {restoringName === b.name ? <RefreshCw size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                    Restore
+                  </button>
                 </div>
               ))}
             </div>
           )}
-          <p className="text-xs text-gray-400 text-center pt-1">
-            To download a backup, switch to the <strong>JSON</strong> tab.
-          </p>
         </div>
       )}
     </Modal>

@@ -2,12 +2,12 @@
  * DataContext.jsx
  *
  * Central data layer for the Dojo Patras app.
- * All state is sourced from Google Sheets via Tauri commands.
+ * All state is sourced from the local SQLite database via Tauri commands.
  * No Firebase. No mock mode. No localStorage migration.
  */
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import * as sheets from '../services/sheetsService'
+import * as sheets from '../services/dataService'
 import { saveAutoBackup } from '../utils/export'
 
 const DataContext = createContext(null)
@@ -28,8 +28,8 @@ export function DataProvider({ children }) {
     setLoading(true)
     setError(null)
     try {
-      // Ensure Google Sheets is set up (no-op if already configured)
-      await sheets.setupSpreadsheet()
+      // Open the local database (creates it on first launch)
+      await sheets.setupDatabase()
 
       const [m, p, a, bh, mn, c] = await Promise.all([
         sheets.getMembers(),
@@ -120,7 +120,7 @@ export function DataProvider({ children }) {
     setSetupLoading(true)
     setError(null)
     try {
-      await sheets.setupSpreadsheet()
+      await sheets.setupDatabase()
       await loadData()
     } catch (err) {
       const msg = typeof err === 'string' ? err : err.message ?? 'Unknown error'

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { format } from 'date-fns'
-import { Sun, Moon, Palette, Clock, Check, Monitor, Image, Building2, Shield, Upload, FileSpreadsheet, Keyboard, Database, Copy, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
+import { Sun, Moon, Palette, Clock, Check, Monitor, Image, Building2, Shield, Upload, FileSpreadsheet, Keyboard, Database, Copy, CheckCircle, XCircle, RefreshCw, FolderOpen, HardDriveDownload } from 'lucide-react'
 import { useData } from '../contexts/DataContext'
-import * as sheets from '../services/sheetsService'
+import * as db from '../services/dataService'
 import { useTheme, ACCENT_PALETTES, TIME_FORMATS, DATE_FORMATS } from '../contexts/ThemeContext'
 import { useServices } from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
@@ -723,86 +723,113 @@ const DEFAULT_SHORTCUTS = [
   { id: 'close',     label: 'Close Modal / Back',  defaultKey: 'Escape',  category: 'Actions' },
 ]
 
-// ── Database connection section ───────────────────────────────────────────────
-function DatabaseSection() {
-  const { error, retrySetup, setupLoading } = useData()
-  const [saEmail, setSaEmail]   = useState('')
-  const [sheetId, setSheetId]   = useState('')
-  const [status,  setStatus]    = useState(null) // null | 'ok' | 'err'
-  const [msg,     setMsg]       = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [copied,  setCopied]    = useState(false)
-
-  useEffect(() => {
-    sheets.getServiceAccountEmail().then(setSaEmail).catch(() => {})
-    sheets.getAppConfig().then(cfg => {
-      if (cfg?.spreadsheetId) { setStatus('ok'); setMsg(`Connected: ${cfg.spreadsheetId}`) }
-    }).catch(() => {})
-  }, [])
-
-  async function handleConnect() {
-    if (!sheetId.trim()) return
-    setLoading(true); setStatus(null); setMsg('')
-    try {
-      const id = sheetId.trim().replace(/.*\/d\/([^/]+).*/, '$1') // accept full URL or bare ID
-      await sheets.connectSpreadsheet(id)
-      setStatus('ok')
-      setMsg(`Connected! Spreadsheet ID: ${id}`)
-      await retrySetup()
-    } catch (e) {
-      setStatus('err')
-      setMsg(typeof e === 'string' ? e : e.message ?? 'Connection failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function copyEmail() {
-    navigator.clipboard.writeText(saEmail)
+// ── Local database section ────────────────────────────────────────────────────
+function PathRow({ label, value }) {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(value)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-
   return (
-    <SettingSection icon={Database} title="Database Connection" description="Connect the app to your Google Sheet.">
-      {/* Service account email */}
-      <div className="mb-4">
-        <p className="text-xs font-semibold text-gray-600 mb-1.5">Service account email (share your sheet with this)</p>
-        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
-          <p className="flex-1 text-xs font-mono text-gray-700 truncate">{saEmail || 'Loading…'}</p>
-          <button onClick={copyEmail} className="shrink-0 text-gray-400 hover:text-gray-700">
+    <div className="mb-3">
+      <p className="text-xs font-semibold text-gray-600 mb-1.5">{label}</p>
+      <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+        <p className="flex-1 text-xs font-mono text-gray-700 truncate" title={value}>{value || '—'}</p>
+        {value && (
+          <button onClick={copy} className="shrink-0 text-gray-400 hover:text-gray-700">
             {copied ? <CheckCircle size={14} className="text-green-500" /> : <Copy size={14} />}
           </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DatabaseSection() {
+  const [config,  setConfig]  = useState(null)
+  const [folder,  setFolder]  = useState('')
+  const [status,  setStatus]  = useState(null) // null | 'ok' | 'err'
+  const [msg,     setMsg]     = useState('')
+  const [saving,  setSaving]  = useState(false)
+  const [backing, setBacking] = useState(false)
+
+  useEffect(() => {
+    db.getAppConfig().then(setConfig).catch(() => {})
+  }, [])
+
+  async function handleChangeFolder() {
+    if (!folder.trim()) return
+    setSaving(true); setStatus(null); setMsg('')
+    try {
+      const next = await db.setDataFolder(folder.trim())
+      setConfig(next)
+      setFolder('')
+      setStatus('ok')
+      setMsg('Data folder updated. The Excel mirror and future backups will be written there.')
+    } catch (e) {
+      setStatus('err')
+      setMsg(typeof e === 'string' ? e : e.message ?? 'Could not change folder')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleBackupNow() {
+    setBacking(true); setStatus(null); setMsg('')
+    try {
+      const info = await db.createBackup()
+      setStatus('ok')
+      setMsg(info ? `Backup saved: ${info.name}` : 'Backups are only available in the desktop app.')
+      db.getAppConfig().then(setConfig).catch(() => {})
+    } catch (e) {
+      setStatus('err')
+      setMsg(typeof e === 'string' ? e : e.message ?? 'Backup failed')
+    } finally {
+      setBacking(false)
+    }
+  }
+
+  return (
+    <SettingSection icon={Database} title="Database & Backups" description="All data is stored in a local database on this PC, mirrored to an Excel file you can open anytime.">
+      <PathRow label="Database file" value={config?.dbPath} />
+      <PathRow label="Excel mirror (read-only copy, updates automatically)" value={config?.mirrorPath} />
+      <PathRow label="Backup folder (daily automatic snapshots)" value={config?.backupFolder} />
+
+      <div className="flex items-center justify-between gap-3 mb-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-700">Last backup</p>
+          <p className="text-xs text-gray-500">{config?.lastBackup || 'Never'}</p>
         </div>
+        <button
+          onClick={handleBackupNow}
+          disabled={backing}
+          className="flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-xs font-semibold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors shrink-0"
+        >
+          {backing ? <RefreshCw size={13} className="animate-spin" /> : <HardDriveDownload size={13} />}
+          Backup Now
+        </button>
       </div>
 
-      {/* Instructions */}
-      <ol className="text-xs text-gray-500 space-y-1.5 mb-4 list-decimal list-inside leading-relaxed">
-        <li>Go to <strong className="text-gray-700">sheets.google.com</strong> → create a new blank spreadsheet</li>
-        <li>Create these tabs (rename Sheet1, add the rest): <br/>
-          <code className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded text-gray-700 leading-loose">
-            Members · Payments · Attendance · BeltHistory · MemberNotes · Comments · Config_Services · Config_Schedule · Config_Instructors · Logs
-          </code>
-        </li>
-        <li>Click <strong className="text-gray-700">Share</strong> → paste the email above → set to <strong className="text-gray-700">Editor</strong> → Send</li>
-        <li>Paste the spreadsheet URL or ID below and click Connect</li>
-      </ol>
-
-      {/* Sheet ID input */}
+      {/* Change data folder */}
+      <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+        <strong className="text-gray-700">Tip:</strong> point the folder below at a OneDrive / Google Drive folder
+        (or a USB stick) and every backup automatically leaves this PC — so the data survives even if the computer dies.
+      </p>
       <div className="flex gap-2">
         <input
-          value={sheetId}
-          onChange={e => setSheetId(e.target.value)}
-          placeholder="Paste spreadsheet URL or ID…"
+          value={folder}
+          onChange={e => setFolder(e.target.value)}
+          placeholder="New data folder, e.g. C:\Users\you\OneDrive\Dojo Patras"
           className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-400"
         />
         <button
-          onClick={handleConnect}
-          disabled={loading || !sheetId.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-xl hover:bg-primary-700 disabled:opacity-50 transition-colors"
+          onClick={handleChangeFolder}
+          disabled={saving || !folder.trim()}
+          className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white text-sm font-semibold rounded-xl hover:bg-gray-900 disabled:opacity-50 transition-colors"
         >
-          {loading ? <RefreshCw size={14} className="animate-spin" /> : null}
-          Connect
+          {saving ? <RefreshCw size={14} className="animate-spin" /> : <FolderOpen size={14} />}
+          Change
         </button>
       </div>
 

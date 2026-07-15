@@ -2,11 +2,17 @@
 
 ## Architecture
 
-The app runs as a **Tauri v2 desktop application**. The React frontend communicates exclusively with the Rust backend via Tauri commands. The Rust backend handles all Google API authentication — no credentials are ever exposed to the browser.
+The app runs as a **Tauri v2 desktop application**. All data lives in a **local SQLite database** on the PC — no cloud account, no API keys, no internet required.
 
 ```
-React UI → Tauri commands (Rust) → Google Sheets API + Google Drive API
+React UI → Tauri commands (Rust) → SQLite (dojo.db)
+                                      ├─→ Excel mirror (dojo-patras-database.xlsx, auto-updated)
+                                      └─→ JSON snapshots (backups/, daily + manual, restorable in-app)
 ```
+
+- **SQLite** is the single source of truth. Writes are transactional; deleting a member removes all their payments/attendance/history atomically.
+- **Excel mirror**: a human-readable `.xlsx` copy of the whole database, rewritten automatically a couple of seconds after any change. Open it anytime — it's read-only from the app's point of view, so editing it never touches the real data.
+- **Backups**: a timestamped JSON snapshot is written automatically on the first launch of each day (30 kept), plus on demand via *Export → Backups → Backup Now*. Any snapshot can be restored in-app; a safety snapshot of the current data is always taken first.
 
 ---
 
@@ -15,52 +21,11 @@ React UI → Tauri commands (Rust) → Google Sheets API + Google Drive API
 - **Node.js** 18+ — https://nodejs.org
 - **Rust** toolchain — https://rustup.rs/
 - **Microsoft C++ Build Tools** (Windows) — required by Tauri
-
-```bash
-# Install Rust on Windows: download rustup-init.exe from https://rustup.rs/ and run it
-```
+  (`winget install Microsoft.VisualStudio.2022.BuildTools` from an **elevated** terminal, with the *Desktop development with C++* workload)
 
 ---
 
-## Step 1 — Google Cloud Setup (one-time)
-
-### 1.1 Create a Google Cloud Project
-1. Go to https://console.cloud.google.com
-2. Click **Select a project → New Project**, name it "Dojo Patras"
-
-### 1.2 Enable Required APIs
-Go to **APIs & Services → Library** and enable:
-- ✅ **Google Sheets API**
-- ✅ **Google Drive API**
-
-### 1.3 Create a Service Account
-1. Go to **IAM & Admin → Service Accounts**
-2. Click **+ Create Service Account** → name it `dojo-patras-sa`
-3. Skip project-level roles (click Continue, then Done)
-
-### 1.4 Download the JSON Key
-1. Click the service account → **Keys** tab → **Add Key → Create new key → JSON**
-2. Save the downloaded file as **`service-account.json`** in the project root
-
----
-
-## Step 2 — Configure the App
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-```
-SERVICE_ACCOUNT_JSON=./service-account.json
-PERSONAL_GMAIL=your.email@gmail.com
-```
-
-> ⚠️ `service-account.json` is in `.gitignore`. It is only read by the Rust backend — never exposed to the browser.
-
----
-
-## Step 3 — Install & Run
+## Install & Run
 
 ```bash
 npm install
@@ -72,44 +37,35 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
----
+No configuration files or environment variables are needed. On first launch the app automatically:
 
-## First Launch — Auto-Setup
-
-On the first run the app automatically:
-1. Creates a Google Spreadsheet **"Dojo Patras"** with 10 tabs and headers
-2. Creates a **"Dojo Patras Backups"** folder in Drive
-3. Shares both with your `PERSONAL_GMAIL` as Editor
-4. Saves the IDs to `{AppData}/dojo_config.json` — all subsequent launches skip setup
+1. Creates the database at `{AppData}/com.dojopatras.app/dojo.db`
+2. Creates the visible data folder `{Documents}/Dojo Patras` with:
+   - `dojo-patras-database.xlsx` — the live Excel mirror
+   - `backups/` — daily + manual JSON snapshots
 
 ---
 
-## Google Sheets Tab Reference
+## Keeping backups off the PC (recommended)
 
-| Tab | Contents |
-|-----|----------|
-| Members | Member roster |
-| Payments | Payment records |
-| Attendance | Session logs |
-| BeltHistory | Belt promotions |
-| MemberNotes | Free-text notes |
-| Comments | Month-level comments |
-| Config_Services | JSON blob — service config |
-| Config_Schedule | JSON blob — schedule + events |
-| Config_Instructors | JSON blob — instructors |
-| Logs | Audit trail |
+In **Settings → Database & Backups** you can move the data folder anywhere — point it at a
+**OneDrive / Google Drive desktop folder** (or a USB stick) and every mirror update and backup
+automatically leaves the machine. If the PC dies, the data survives.
 
 ---
 
-## Backup Strategy
+## Migrating data from the old Google Sheets version
 
-| Layer | When | Where |
-|-------|------|-------|
-| Google Sheets (live) | Real-time writes | Always current in Drive |
-| Daily local snapshot | Each app startup | localStorage (3-day rolling) |
-| Manual JSON export | On demand | Drive "Dojo Patras Backups" + `{AppData}/backups/` |
+Use **Settings → Import Data**. Either paste AI-transformed JSON (prompts are provided in the UI),
+or export the old spreadsheet and run it through the *Import All* flow. Imports are fast — everything
+is written locally.
 
-Trigger a backup: **Export button → JSON tab → Download .json**
+---
+
+## Restore from a backup
+
+**Export button (top bar) → Backups tab** — pick any snapshot and click *Restore*.
+The current data is snapshotted first (`pre-restore-…json`), so a restore can itself be undone.
 
 ---
 
@@ -119,13 +75,16 @@ Trigger a backup: **Export button → JSON tab → Download .json**
 src-tauri/target/release/bundle/msi/Dojo Patras_1.0.0_x64_en-US.msi
 ```
 
+GitHub Actions (`.github/workflows/build.yml`) builds the installer on every push to `main` —
+no secrets required anymore.
+
 ---
 
 ## Troubleshooting
 
 | Error | Fix |
 |-------|-----|
-| "Google Sheets not initialized" | Check `.env` path is correct and file exists |
-| "Cannot read service account file" | Use absolute path in `SERVICE_ACCOUNT_JSON` |
-| "Token exchange error 401" | Re-download key; verify Sheets + Drive APIs are enabled |
-| Data not appearing in Sheets | Writes are batched — wait ~2 seconds |
+| "Database not initialized" | Restart the app; check `{AppData}/com.dojopatras.app` is writable |
+| Excel mirror not updating | Close the file in Excel — the app retries automatically every few seconds |
+| "Cannot replace Excel mirror" | Same as above: the file is locked while open in Excel |
+| Restore fails | Make sure the `.json` file is inside the backup folder shown in Settings |

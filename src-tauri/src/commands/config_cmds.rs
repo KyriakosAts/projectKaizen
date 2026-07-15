@@ -1,56 +1,41 @@
 use tauri::State;
 use crate::{
-    models::{SHEET_CONFIG_SVC, SHEET_CONFIG_SCH, SHEET_CONFIG_INST},
-    state::{AppState, get_sheets},
+    db,
+    state::{with_db, AppState},
 };
 
 #[tauri::command]
-pub async fn get_services_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_SVC);
-    sheets.read_cell(&range).await
+pub fn get_services_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    with_db(&state, |conn| db::get_setting(conn, db::SETTING_SERVICES))
 }
 
 #[tauri::command]
-pub async fn save_services_config(
-    state: State<'_, AppState>,
-    json: String,
-) -> Result<(), String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_SVC);
-    sheets.write_cell(&range, &json).await
+pub fn save_services_config(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    with_db(&state, |conn| db::set_setting(conn, db::SETTING_SERVICES, &json))?;
+    state.mirror.mark_dirty();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn get_schedule_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_SCH);
-    sheets.read_cell(&range).await
+pub fn get_schedule_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    with_db(&state, |conn| db::get_setting(conn, db::SETTING_SCHEDULE))
 }
 
 #[tauri::command]
-pub async fn save_schedule_config(
-    state: State<'_, AppState>,
-    json: String,
-) -> Result<(), String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_SCH);
-    sheets.write_cell(&range, &json).await
+pub fn save_schedule_config(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    with_db(&state, |conn| db::set_setting(conn, db::SETTING_SCHEDULE, &json))?;
+    state.mirror.mark_dirty();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn get_instructors_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_INST);
-    sheets.read_cell(&range).await
+pub fn get_instructors_config(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    with_db(&state, |conn| db::get_setting(conn, db::SETTING_INSTRUCTORS))
 }
 
 #[tauri::command]
-pub async fn save_instructors_config(
-    state: State<'_, AppState>,
-    json: String,
-) -> Result<(), String> {
-    let sheets = get_sheets(&state).await?;
-    let range  = format!("{}!A1", SHEET_CONFIG_INST);
-    sheets.write_cell(&range, &json).await
+pub fn save_instructors_config(state: State<'_, AppState>, json: String) -> Result<(), String> {
+    with_db(&state, |conn| db::set_setting(conn, db::SETTING_INSTRUCTORS, &json))?;
+    state.mirror.mark_dirty();
+    Ok(())
 }

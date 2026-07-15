@@ -1,7 +1,6 @@
-mod auth;
-mod drive;
+mod db;
+mod mirror;
 mod models;
-mod sheets;
 mod state;
 mod commands;
 
@@ -16,11 +15,10 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
-            // Setup
-            commands::setup::setup_spreadsheet,
+            // Setup / settings
+            commands::setup::setup_database,
             commands::setup::get_app_config,
-            commands::setup::connect_spreadsheet,
-            commands::setup::get_service_account_email,
+            commands::setup::set_data_folder,
             // Members
             commands::members::get_members,
             commands::members::add_member,
@@ -52,9 +50,10 @@ pub fn run() {
             commands::config_cmds::save_schedule_config,
             commands::config_cmds::get_instructors_config,
             commands::config_cmds::save_instructors_config,
-            // Backup
+            // Backup / restore
             commands::backup::create_backup,
             commands::backup::list_backups,
+            commands::backup::restore_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")
