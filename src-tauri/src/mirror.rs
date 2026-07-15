@@ -51,9 +51,13 @@ impl MirrorHandle {
                     }
                 }
             };
+            // Exponential backoff while the file is locked (open in Excel):
+            // 2s → 4s → 8s … capped at 60s, reset on the first success
+            let mut delay = Duration::from_secs(2);
             loop {
-                std::thread::sleep(Duration::from_secs(2));
+                std::thread::sleep(delay);
                 if !dirty.swap(false, Ordering::SeqCst) {
+                    delay = Duration::from_secs(2);
                     continue;
                 }
                 let result = db::snapshot_all(&conn)
@@ -62,9 +66,13 @@ impl MirrorHandle {
                             .ok_or_else(|| "data folder not configured".to_string())?;
                         export_xlsx(&snap, &Path::new(&folder).join(MIRROR_FILENAME))
                     });
-                if let Err(e) = result {
-                    eprintln!("[mirror] export failed (will retry): {e}");
-                    dirty.store(true, Ordering::SeqCst);
+                match result {
+                    Ok(()) => delay = Duration::from_secs(2),
+                    Err(e) => {
+                        eprintln!("[mirror] export failed (retrying in {}s): {e}", delay.as_secs());
+                        dirty.store(true, Ordering::SeqCst);
+                        delay = (delay * 2).min(Duration::from_secs(60));
+                    }
                 }
             }
         });

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { FileSpreadsheet, Download, Users, CreditCard, Activity, MessageSquare, FileJson, History, RotateCcw, HardDriveDownload, RefreshCw } from 'lucide-react'
 import { useData } from '../contexts/DataContext'
 import { useServices } from '../contexts/ServicesContext'
+import { useInstructors } from '../contexts/InstructorsContext'
 import { useSchedule } from '../contexts/ScheduleContext'
 import * as db from '../services/dataService'
 import { exportToExcel, exportToJSON } from '../utils/export'
@@ -28,8 +29,9 @@ function PreviewStat({ icon: Icon, label, count, color }) {
 }
 
 export default function ExportModal({ onClose }) {
-  const { members, payments, comments, attendance, beltHistory, memberNotes, reload } = useData()
+  const { members, payments, comments, attendance, beltHistory, memberNotes } = useData()
   const { services }                    = useServices()
+  const { instructors }                 = useInstructors()
   const { classes, events }             = useSchedule()
   const [tab,           setTab]         = useState('excel') // 'excel' | 'json' | 'backups'
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -67,12 +69,16 @@ export default function ExportModal({ onClose }) {
     setRestoringName(name); setBackupMsg(null)
     try {
       const r = await db.restoreBackup(name)
-      setBackupMsg({ ok: true, text: `Restored ${r.members} members, ${r.payments} payments, ${r.attendance} attendance records. Safety snapshot: ${r.safetyBackup}` })
-      await reload()
-      refreshBackups()
+      window.alert(
+        `Restored ${r.members} members, ${r.payments} payments, ${r.attendance} attendance records, ` +
+        `${r.beltHistory} belt entries, ${r.memberNotes} notes, ${r.comments} comments.\n\n` +
+        `Safety snapshot of the previous data: ${r.safetyBackup}\n\nThe app will now reload.`
+      )
+      // Full reload so services/schedule/instructors contexts pick up the
+      // restored config instead of autosaving their pre-restore state over it
+      window.location.reload()
     } catch (e) {
       setBackupMsg({ ok: false, text: typeof e === 'string' ? e : e.message ?? 'Restore failed' })
-    } finally {
       setRestoringName(null)
     }
   }
@@ -94,22 +100,31 @@ export default function ExportModal({ onClose }) {
     }
   }, [members, payments, comments, categoryFilter, statusFilter])
 
+  const [exportError, setExportError] = useState('')
+
   async function handleDownloadExcel() {
     setExporting(true)
+    setExportError('')
     try {
       await exportToExcel(members, payments, comments ?? [], { categoryFilter, statusFilter })
       onClose()
+    } catch (err) {
+      setExportError(typeof err === 'string' ? err : err.message ?? 'Excel export failed')
     } finally {
       setExporting(false)
     }
   }
 
   function handleDownloadJSON() {
-    exportToJSON({
-      members, payments, attendance, beltHistory, memberNotes,
-      comments, services, classes, events,
-    })
-    onClose()
+    try {
+      exportToJSON({
+        members, payments, attendance, beltHistory, memberNotes,
+        comments, services, classes, events, instructors,
+      })
+      onClose()
+    } catch (err) {
+      setExportError(typeof err === 'string' ? err : err.message ?? 'JSON export failed')
+    }
   }
 
   // Tab labels
@@ -148,6 +163,13 @@ export default function ExportModal({ onClose }) {
         </div>
       }
     >
+      {/* Export error */}
+      {exportError && (
+        <div className="mb-4 p-2.5 bg-red-50 border border-red-100 rounded-xl">
+          <p className="text-xs text-red-700">{exportError}</p>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-0.5 bg-gray-100 rounded-xl p-0.5 mb-5">
         {tabs.map(t => (
@@ -253,7 +275,8 @@ export default function ExportModal({ onClose }) {
             <p className="text-xs text-blue-700">
               Exports <strong>all collections</strong> — members, payments, attendance, belt history,
               notes, comments, services, schedule, and instructors — as a single timestamped JSON file.
-              Use this to migrate data or restore from a backup.
+              Good for archiving or moving data elsewhere. To restore this app from a snapshot, use
+              the <strong>Backups</strong> tab instead.
             </p>
           </div>
           <div className="bg-gray-50 rounded-xl px-4 py-1">

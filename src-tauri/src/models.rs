@@ -148,6 +148,8 @@ pub struct SetupResult {
     pub mirror_path: String,
     pub backup_folder: String,
     pub created: bool,  // true = database newly created on this launch
+    /// Non-fatal startup problems (unavailable data folder, failed auto-backup)
+    pub warning: Option<String>,
 }
 
 // ─── BackupInfo ────────────────────────────────────────────────────────────────

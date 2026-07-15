@@ -72,39 +72,42 @@ pub fn do_create_backup(conn: &Connection, prefix: &str) -> Result<BackupInfo, S
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_backup(state: State<'_, AppState>) -> Result<BackupInfo, String> {
     with_db(&state, |conn| do_create_backup(conn, "dojo-backup"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, String> {
     with_db(&state, |conn| {
         let dir = backups_dir(conn)?;
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|e| format!("Cannot read backup folder '{}': {e}", dir.display()))?;
         let mut backups = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !name.ends_with(".json") {
-                    continue;
-                }
-                let meta = entry.metadata().ok();
-                let date = meta
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .map(|t| {
-                        chrono::DateTime::<chrono::Local>::from(t)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
-                backups.push(BackupInfo {
-                    name,
-                    date,
-                    local_path: entry.path().to_str().map(|s| s.to_string()),
-                    size_bytes: meta.map(|m| m.len()),
-                });
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            // Only known snapshot files — stray JSON in the folder isn't restorable
+            if !name.ends_with(".json")
+                || !(name.starts_with("dojo-backup-") || name.starts_with("pre-restore-"))
+            {
+                continue;
             }
+            let meta = entry.metadata().ok();
+            let date = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .map(|t| {
+                    chrono::DateTime::<chrono::Local>::from(t)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            backups.push(BackupInfo {
+                name,
+                date,
+                local_path: entry.path().to_str().map(|s| s.to_string()),
+                size_bytes: meta.map(|m| m.len()),
+            });
         }
         backups.sort_by(|a, b| b.name.cmp(&a.name));
         Ok(backups)
@@ -113,15 +116,23 @@ pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, Strin
 
 #[derive(Deserialize)]
 struct BackupDoc {
+    #[serde(default)]
+    version: Option<String>,
     data: db::Snapshot,
 }
 
 /// Replace all data with the contents of a backup file from the backup folder.
 /// A pre-restore safety snapshot of the current data is always taken first,
 /// so a restore can itself be undone.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_backup(state: State<'_, AppState>, name: String) -> Result<RestoreResult, String> {
-    if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".json") {
+    // The name must be a bare filename inside the backup folder — reject
+    // separators, traversal, and Windows drive-relative paths ("C:x.json")
+    let is_bare_filename = std::path::Path::new(&name)
+        .file_name()
+        .map(|f| f == std::ffi::OsStr::new(&name))
+        .unwrap_or(false);
+    if !is_bare_filename || name.contains(':') || !name.ends_with(".json") {
         return Err("Invalid backup name".to_string());
     }
 
@@ -131,6 +142,13 @@ pub fn restore_backup(state: State<'_, AppState>, name: String) -> Result<Restor
             .map_err(|e| format!("Cannot read backup '{name}': {e}"))?;
         let doc: BackupDoc = serde_json::from_str(&raw)
             .map_err(|e| format!("'{name}' is not a valid Dojo Patras backup: {e}"))?;
+        if let Some(v) = &doc.version {
+            if !v.starts_with("3.") {
+                return Err(format!(
+                    "'{name}' is a version {v} backup from the old Google Sheets era and cannot be restored directly. Use Settings → Import Data instead."
+                ));
+            }
+        }
 
         let safety = do_create_backup(conn, "pre-restore")?;
         db::restore_all(conn, &doc.data)?;

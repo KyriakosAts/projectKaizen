@@ -61,12 +61,21 @@ export function ScheduleProvider({ children }) {
     }, 500)
   }
 
-  // On mount: load from the database
+  // On mount: load from the database.
+  // Autosave (below) is only enabled after a successful load — a failed or
+  // corrupt load must never let defaults overwrite the stored config. A fresh
+  // database (no config yet) is seeded automatically by the autosave effect.
   useEffect(() => {
     async function init() {
+      let json = null
       try {
-        const json = await getScheduleConfig()
-        if (json) {
+        json = await getScheduleConfig()
+      } catch (err) {
+        console.error('[ScheduleContext] Failed to load schedule config — autosave disabled to protect stored data:', err)
+        return
+      }
+      if (json) {
+        try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
           const loadedClasses = Array.isArray(parsed.classes) ? parsed.classes : DEFAULT_CLASSES
           const loadedEvents  = Array.isArray(parsed.events)  ? parsed.events  : []
@@ -74,15 +83,12 @@ export function ScheduleProvider({ children }) {
           setEvents(loadedEvents)
           classesRef.current = loadedClasses
           eventsRef.current  = loadedEvents
-        } else {
-          await saveScheduleConfig(JSON.stringify({ classes: DEFAULT_CLASSES, events: [] }))
+        } catch (err) {
+          console.error('[ScheduleContext] Stored schedule config is corrupt — autosave disabled to protect it:', err)
+          return
         }
-        // Only enable autosave after a successful load — if the load failed we
-        // must never save defaults over the stored config
-        setInitialized(true)
-      } catch (err) {
-        console.error('[ScheduleContext] Failed to load schedule config — autosave disabled to protect stored data:', err)
       }
+      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

@@ -78,8 +78,15 @@ const LOCAL = {
   get_payments: () => ls.get(LS.payments, []),
 
   add_payment: ({ data }) => {
-    const id = ls.uid()
     const rows = ls.get(LS.payments, [])
+    // Same event-payment dedup contract as the Rust backend: null = duplicate
+    if (data.note?.includes('(event)')) {
+      const dup = rows.some(p =>
+        p.memberId === data.memberId && p.month === data.month && p.note === data.note
+      )
+      if (dup) return null
+    }
+    const id = ls.uid()
     rows.unshift({ ...data, id, createdAt: ls.now() })
     ls.set(LS.payments, rows)
     return id

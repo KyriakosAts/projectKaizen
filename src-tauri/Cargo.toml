@@ -1,6 +1,6 @@
 [package]
 name = "dojo-patras"
-version = "1.0.0"
+version = "2.0.0"
 description = "Dojo Patras Gym Management"
 authors = ["Dojo Patras"]
 edition = "2021"
@@ -24,6 +24,5 @@ serde            = { version = "1", features = ["derive"] }
 serde_json       = "1"
 chrono           = { version = "0.4", features = ["serde"] }
 uuid             = { version = "1", features = ["v4"] }
-tokio            = { version = "1", features = ["full"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rust_xlsxwriter = "0.96.0"

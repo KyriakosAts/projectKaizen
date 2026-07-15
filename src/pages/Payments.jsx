@@ -360,6 +360,7 @@ function BulkPayModal({ rows, onMarkPaid, onCreateAndPay, onClose, currentMonth,
   const [processing, setProcessing] = useState(false)
   const [completed, setCompleted] = useState(0)
   const [confirmStep, setConfirmStep] = useState(false)
+  const [bulkError, setBulkError] = useState('')
 
   function toggle(id) {
     setSelected(prev => {
@@ -382,16 +383,27 @@ function BulkPayModal({ rows, onMarkPaid, onCreateAndPay, onClose, currentMonth,
   async function handleSubmit() {
     if (selectedRows.length === 0) return
     if (!confirmStep) { setConfirmStep(true); return }
-    setProcessing(true); setCompleted(0); setConfirmStep(false)
-    for (const row of selectedRows) {
-      if (row._isVirtual) {
-        await onCreateAndPay(row.member, row.impliedMonth)
-      } else {
-        await onMarkPaid(row.payment.id)
+    setProcessing(true); setCompleted(0); setConfirmStep(false); setBulkError('')
+    let done = 0
+    try {
+      for (const row of selectedRows) {
+        if (row._isVirtual) {
+          await onCreateAndPay(row.member, row.impliedMonth)
+        } else {
+          await onMarkPaid(row.payment.id)
+        }
+        done++
+        setCompleted(c => c + 1)
       }
-      setCompleted(c => c + 1)
+      onClose()
+    } catch (err) {
+      setBulkError(
+        `Stopped after ${done} of ${selectedRows.length}: ${typeof err === 'string' ? err : err.message ?? 'Unknown error'}. ` +
+        'Payments already marked stay marked — reselect the rest and retry.'
+      )
+    } finally {
+      setProcessing(false)
     }
-    setProcessing(false); onClose()
   }
 
   return (
@@ -508,6 +520,13 @@ function BulkPayModal({ rows, onMarkPaid, onCreateAndPay, onClose, currentMonth,
             <p className="text-xs text-primary-600 mt-1 text-center font-medium">
               Processing {completed} / {selectedRows.length}…
             </p>
+          </div>
+        )}
+
+        {/* Error banner */}
+        {bulkError && (
+          <div className="px-5 py-2.5 border-t border-red-100 bg-red-50">
+            <p className="text-xs text-red-700">{bulkError}</p>
           </div>
         )}
 

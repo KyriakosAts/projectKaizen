@@ -46,7 +46,7 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
         category:   promoForm.category,
         fromBelt,
         toBelt:     promoForm.toBelt,
-        promotedAt: new Date(logDate),
+        promotedAt: logDate, // plain YYYY-MM-DD, consistent with all other dates
         notes:      promoForm.notes,
       })
       // Build note with class context
@@ -63,6 +63,8 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
       if (addMemberNote) await addMemberNote(member.id, noteText)
       setShowPromoForm(false)
       setPromoForm({ category: '', toBelt: '', notes: '' })
+    } catch (err) {
+      window.alert(`Could not save promotion: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
     } finally {
       setPromoSaving(false)
     }
@@ -95,7 +97,9 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
             p => p.memberId === member.id && p.month === month && p.note === expectedNote
           )
           if (!alreadyPaid) {
-            onAddPayment({
+            // Await so a failed fee creation is surfaced — otherwise the
+            // attendance exists but the event is silently never billed
+            await onAddPayment({
               memberId: member.id,
               month,
               amount:   Number(item.extraCost),
@@ -105,6 +109,8 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
           }
         }
       }
+    } catch (err) {
+      window.alert(`Could not save: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
     } finally { setQuickBusy(null) }
   }
 

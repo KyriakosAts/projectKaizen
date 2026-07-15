@@ -16,29 +16,33 @@ export function ServicesProvider({ children }) {
   const ref = useRef(services)
   ref.current = services
 
-  // On mount: load from the database
+  // On mount: load from the database.
+  // Autosave (below) is only enabled after a successful load — a failed or
+  // corrupt load must never let defaults overwrite the stored config. A fresh
+  // database (no config yet) is seeded automatically by the autosave effect.
   useEffect(() => {
     async function init() {
+      let json = null
       try {
-        const json = await getServicesConfig()
-        if (json) {
+        json = await getServicesConfig()
+      } catch (err) {
+        console.error('[ServicesContext] Failed to load services config — autosave disabled to protect stored data:', err)
+        return
+      }
+      if (json) {
+        try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
           const loaded = parsed.services ?? parsed
           if (Array.isArray(loaded) && loaded.length > 0) {
             setServices(loaded)
             ref.current = loaded
-          } else {
-            await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
           }
-        } else {
-          await saveServicesConfig(JSON.stringify({ services: DEFAULT_SERVICES }))
+        } catch (err) {
+          console.error('[ServicesContext] Stored services config is corrupt — autosave disabled to protect it:', err)
+          return
         }
-        // Only enable autosave after a successful load — if the load failed we
-        // must never save defaults over the stored config
-        setInitialized(true)
-      } catch (err) {
-        console.error('[ServicesContext] Failed to load services config — autosave disabled to protect stored data:', err)
       }
+      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -63,7 +67,10 @@ export function ServicesProvider({ children }) {
   const addService = useCallback((data) => {
     const id = data.id ?? `svc_${Date.now()}`
     const newService = { active: true, usesBelts: false, ...data, id }
-    setAndSync(prev => [...prev, newService])
+    // Upsert — re-importing an existing service id updates it instead of duplicating
+    setAndSync(prev => prev.some(s => s.id === id)
+      ? prev.map(s => (s.id === id ? { ...s, ...newService } : s))
+      : [...prev, newService])
     return id
   }, [])
 

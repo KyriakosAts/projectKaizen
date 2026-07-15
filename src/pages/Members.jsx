@@ -16,10 +16,18 @@ import { useServices } from '../contexts/ServicesContext'
 // ── Delete confirmation ────────────────────────────────────────────────────────
 function DeleteModal({ member, onClose, onConfirm }) {
   const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState('')
   async function handleDelete() {
     setDeleting(true)
-    await onConfirm()
-    onClose()
+    setError('')
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err) {
+      setError(typeof err === 'string' ? err : err.message ?? 'Delete failed')
+    } finally {
+      setDeleting(false)
+    }
   }
   return (
     <Modal
@@ -38,6 +46,7 @@ function DeleteModal({ member, onClose, onConfirm }) {
         <span className="font-semibold text-gray-900">{member.name}</span>?{' '}
         This will also remove all their payment records and cannot be undone.
       </p>
+      {error && <p className="text-xs text-red-600 mt-3 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>}
     </Modal>
   )
 }

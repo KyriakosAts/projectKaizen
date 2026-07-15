@@ -123,25 +123,29 @@ export default function MemberModal({ member, onClose, onSave, addBeltPromotion,
       const returnedId = await onSave(data)
       const effectiveMemberId = returnedId ?? member?.id
 
-      // Auto-create "Joined" belt history entry for new belt service assignments
+      // Auto-create "Joined" belt history entry for new belt service assignments.
+      // The member is already saved at this point — a failure here must not
+      // look like a failed save (resubmitting would create a duplicate member).
       if (addBeltPromotion && effectiveMemberId) {
-        for (const cat of beltCats) {
-          const belt = validBelts[cat]
-          if (!belt) continue
-          // Skip if there's already a history entry for this member + category
-          const hasHistory = (existingBeltHistory ?? []).some(
-            h => h.memberId === effectiveMemberId && h.category === cat
-          )
-          if (hasHistory) continue
-          const serviceDate = form.serviceDates[cat]
-          const joinDate = serviceDate ? new Date(serviceDate) : new Date(form.joinDate)
-          await addBeltPromotion(effectiveMemberId, {
-            category:   cat,
-            fromBelt:   null,
-            toBelt:     belt,
-            promotedAt: joinDate,
-            notes:      'Started journey',
-          })
+        try {
+          for (const cat of beltCats) {
+            const belt = validBelts[cat]
+            if (!belt) continue
+            // Skip if there's already a history entry for this member + category
+            const hasHistory = (existingBeltHistory ?? []).some(
+              h => h.memberId === effectiveMemberId && h.category === cat
+            )
+            if (hasHistory) continue
+            await addBeltPromotion(effectiveMemberId, {
+              category:   cat,
+              fromBelt:   null,
+              toBelt:     belt,
+              promotedAt: form.serviceDates[cat] || form.joinDate,
+              notes:      'Started journey',
+            })
+          }
+        } catch (err) {
+          console.error('[MemberModal] Member saved, but starting belt history failed:', err)
         }
       }
 
@@ -179,19 +183,27 @@ export default function MemberModal({ member, onClose, onSave, addBeltPromotion,
   async function handleBackfillAll() {
     if (!backfillStep) return
     setSaving(true)
+    // Work through a mutable list so a mid-loop failure keeps only the
+    // remaining months — retrying never re-creates already-added payments
+    const remaining = [...backfillStep.monthList]
     try {
-      for (const month of backfillStep.monthList) {
+      while (remaining.length > 0) {
         await addPayment({
           memberId: backfillStep.memberId,
-          month,
+          month:    remaining[0],
           amount:   backfillStep.fee,
           status:   'unpaid',
         })
+        remaining.shift()
       }
+      onClose()
+    } catch (err) {
+      setBackfillStep(prev => (prev ? { ...prev, monthList: remaining } : prev))
+      const msg = typeof err === 'string' ? err : err?.message ?? 'Unknown error'
+      setErrors(prev => ({ ...prev, _general: `Backfill stopped (${remaining.length} months left): ${msg}. Click again to add the rest.` }))
     } finally {
       setSaving(false)
     }
-    onClose()
   }
 
   function handleBackfillSkip() {

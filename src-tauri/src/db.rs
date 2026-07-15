@@ -98,12 +98,19 @@ CREATE TABLE IF NOT EXISTS logs (
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open database: {e}"))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5000))
+        .map_err(|e| format!("Cannot set busy timeout: {e}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| format!("Cannot enable WAL: {e}"))?;
     conn.pragma_update(None, "foreign_keys", "ON")
         .map_err(|e| format!("Cannot enable foreign keys: {e}"))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| format!("Cannot create schema: {e}"))?;
+    // Keep the audit log bounded
+    let _ = conn.execute(
+        "DELETE FROM logs WHERE id < (SELECT COALESCE(MAX(id), 0) FROM logs) - 10000",
+        [],
+    );
     Ok(conn)
 }
 
@@ -274,7 +281,7 @@ pub fn list_payments(conn: &Connection) -> Result<Vec<Payment>, String> {
 
 pub fn payment_duplicate_exists(conn: &Connection, member_id: &str, month: &str, note: &str) -> Result<bool, String> {
     conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM payments WHERE member_id=?1 AND month=?2 AND note=?3)",
+        "SELECT EXISTS(SELECT 1 FROM payments WHERE member_id=?1 AND month=?2 AND note IS ?3)",
         params![member_id, month, note],
         |r| r.get(0),
     )
@@ -496,11 +503,16 @@ pub fn restore_all(conn: &mut Connection, snap: &Snapshot) -> Result<(), String>
             ).map_err(db_err)?;
         }
 
+        // Full fidelity: clear the config keys first so a snapshot taken
+        // before a config existed doesn't inherit the current one
+        tx.execute(
+            "DELETE FROM settings WHERE key IN (?1, ?2, ?3)",
+            params![SETTING_SERVICES, SETTING_SCHEDULE, SETTING_INSTRUCTORS],
+        ).map_err(db_err)?;
         let mut set = |key: &str, val: &Option<String>| -> Result<(), String> {
             if let Some(v) = val {
                 tx.execute(
-                    "INSERT INTO settings (key, value) VALUES (?1, ?2)
-                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2)",
                     params![key, v],
                 ).map(|_| ()).map_err(db_err)?;
             }
@@ -513,6 +525,8 @@ pub fn restore_all(conn: &mut Connection, snap: &Snapshot) -> Result<(), String>
         tx.commit().map_err(db_err)
     })();
 
-    let _ = conn.pragma_update(None, "foreign_keys", "ON");
-    result
+    let reenable = conn
+        .pragma_update(None, "foreign_keys", "ON")
+        .map_err(|e| format!("Restore succeeded but foreign keys could not be re-enabled — restart the app: {e}"));
+    result.and(reenable)
 }

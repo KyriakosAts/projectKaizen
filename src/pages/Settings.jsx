@@ -297,7 +297,7 @@ Here is my class schedule and events:`,
 function ImportSection() {
   const { addMember, addPayment } = useData()
   const { addService } = useServices()
-  const { addInstructor } = useInstructors()
+  const { instructors, addInstructor } = useInstructors()
   const { addClass, addEvent } = useSchedule()
   const [mode, setMode] = useState('all')
   const [status, setStatus] = useState(null)
@@ -368,8 +368,10 @@ function ImportSection() {
         for (const s of (preview.services ?? [])) {
           addService({ id: s.id, name: s.name ?? '', description: s.description ?? '', color: s.color ?? '#94a3b8', monthlyFee: Number(s.monthlyFee) || 0, usesBelts: !!s.usesBelts })
         }
-        // 2. Instructors
+        // 2. Instructors (skip names that already exist — re-import safe)
         for (const ins of (preview.instructors ?? [])) {
+          const exists = instructors.some(i => i.name?.trim().toLowerCase() === (ins.name ?? '').trim().toLowerCase())
+          if (exists) continue
           addInstructor({ name: ins.name ?? '', phone: ins.phone ?? '', email: ins.email ?? '', bio: ins.bio ?? '', serviceIds: Array.isArray(ins.serviceIds) ? ins.serviceIds : [] })
         }
         // 3. Classes
@@ -383,12 +385,15 @@ function ImportSection() {
         // 5. Members
         const idMap = {}
         for (const m of (preview.members ?? [])) {
+          const cats = Array.isArray(m.categories) ? m.categories : [m.categories].filter(Boolean)
           const id = await addMember({
             name: m.name ?? '',
             phone: m.phone ?? '',
             email: m.email ?? '',
-            categories: Array.isArray(m.categories) ? m.categories : [m.categories].filter(Boolean),
-            belt: m.belt ?? 'white',
+            categories: cats,
+            // Map the single AI-provided belt onto every selected service
+            belts: (m.belts && typeof m.belts === 'object') ? m.belts
+              : (m.belt ? Object.fromEntries(cats.map(c => [c, m.belt])) : {}),
             joinDate: m.joinDate ? new Date(m.joinDate) : new Date(),
             status: m.status ?? 'active',
             notes: m.notes ?? '',
@@ -404,12 +409,14 @@ function ImportSection() {
       } else if (mode === 'new') {
         const idMap = {}
         for (const m of (preview.members ?? [])) {
+          const cats = Array.isArray(m.categories) ? m.categories : [m.categories].filter(Boolean)
           const id = await addMember({
             name: m.name ?? '',
             phone: m.phone ?? '',
             email: m.email ?? '',
-            categories: Array.isArray(m.categories) ? m.categories : [m.categories].filter(Boolean),
-            belt: m.belt ?? 'white',
+            categories: cats,
+            belts: (m.belts && typeof m.belts === 'object') ? m.belts
+              : (m.belt ? Object.fromEntries(cats.map(c => [c, m.belt])) : {}),
             joinDate: m.joinDate ? new Date(m.joinDate) : new Date(),
             status: m.status ?? 'active',
             notes: m.notes ?? '',
@@ -1173,7 +1180,7 @@ export default function SettingsPage() {
 
       <div className="text-center py-4">
         <p className="text-xs text-gray-400">All preferences are saved locally and persist across sessions.</p>
-        <p className="text-xs text-gray-400 mt-1">{gymName} · v0.oneAndOnly</p>
+        <p className="text-xs text-gray-400 mt-1">{gymName} · v2.0.0</p>
       </div>
     </div>
   )

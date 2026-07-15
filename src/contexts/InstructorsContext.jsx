@@ -9,27 +9,33 @@ export function InstructorsProvider({ children }) {
   const ref = useRef(instructors)
   ref.current = instructors
 
-  // On mount: load from the database
+  // On mount: load from the database.
+  // Autosave (below) is only enabled after a successful load — a failed or
+  // corrupt load must never let defaults overwrite the stored config. A fresh
+  // database (no config yet) is seeded automatically by the autosave effect.
   useEffect(() => {
     async function init() {
+      let json = null
       try {
-        const json = await getInstructorsConfig()
-        if (json) {
+        json = await getInstructorsConfig()
+      } catch (err) {
+        console.error('[InstructorsContext] Failed to load instructors config — autosave disabled to protect stored data:', err)
+        return
+      }
+      if (json) {
+        try {
           const parsed = typeof json === 'string' ? JSON.parse(json) : json
           const loaded = parsed.instructors ?? parsed
           if (Array.isArray(loaded)) {
             setInstructors(loaded)
             ref.current = loaded
           }
-        } else {
-          await saveInstructorsConfig(JSON.stringify({ instructors: [] }))
+        } catch (err) {
+          console.error('[InstructorsContext] Stored instructors config is corrupt — autosave disabled to protect it:', err)
+          return
         }
-        // Only enable autosave after a successful load — if the load failed we
-        // must never save defaults over the stored config
-        setInitialized(true)
-      } catch (err) {
-        console.error('[InstructorsContext] Failed to load instructors config — autosave disabled to protect stored data:', err)
       }
+      setInitialized(true)
     }
     init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

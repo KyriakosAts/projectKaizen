@@ -6,11 +6,17 @@
  * No Firebase. No mock mode. No localStorage migration.
  */
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
 import * as sheets from '../services/dataService'
 import { saveAutoBackup } from '../utils/export'
 
 const DataContext = createContext(null)
+
+const normalizeComments = (arr) => arr.map(c => ({
+  ...c,
+  memberId:  c.memberId  ?? c.member_id,
+  updatedAt: c.updatedAt ?? c.updated_at,
+}))
 
 export function DataProvider({ children }) {
   const [members,     setMembers]     = useState([])
@@ -29,7 +35,8 @@ export function DataProvider({ children }) {
     setError(null)
     try {
       // Open the local database (creates it on first launch)
-      await sheets.setupDatabase()
+      const setup = await sheets.setupDatabase()
+      if (setup?.warning) console.warn('[DataContext] Setup warning:', setup.warning)
 
       const [m, p, a, bh, mn, c] = await Promise.all([
         sheets.getMembers(),
@@ -83,12 +90,6 @@ export function DataProvider({ children }) {
         ...n,
         memberId:  n.memberId  ?? n.member_id,
         createdAt: n.createdAt ?? n.created_at,
-      }))
-
-      const normalizeComments = (arr) => arr.map(c => ({
-        ...c,
-        memberId:  c.memberId  ?? c.member_id,
-        updatedAt: c.updatedAt ?? c.updated_at,
       }))
 
       const nm  = normalizeMembers(m)
@@ -240,7 +241,7 @@ export function DataProvider({ children }) {
     } catch (err) {
       console.error('[DataContext] upsertComment failed:', err)
       setError(typeof err === 'string' ? err : err.message)
-      sheets.getComments().then(c => setComments(c)).catch(() => {})
+      sheets.getComments().then(c => setComments(normalizeComments(c))).catch(() => {})
       throw err
     }
   }, [])
@@ -316,8 +317,8 @@ export function DataProvider({ children }) {
     }
   }, [])
 
-  // ── Context value ──────────────────────────────────────────────────────────
-  const value = {
+  // ── Context value (memoized so unrelated provider re-renders don't cascade) ──
+  const value = useMemo(() => ({
     members, payments, comments, beltHistory, memberNotes, attendance, loading, error,
     setupLoading, retrySetup,
     addMember, updateMember, deleteMember,
@@ -327,7 +328,17 @@ export function DataProvider({ children }) {
     addMemberNote, deleteMemberNote,
     logAttendance, removeAttendance,
     reload: loadData,
-  }
+  }), [
+    members, payments, comments, beltHistory, memberNotes, attendance, loading, error,
+    setupLoading, retrySetup,
+    addMember, updateMember, deleteMember,
+    addPayment, markPaymentPaid, markPaymentUnpaid,
+    upsertComment, getComment,
+    addBeltPromotion,
+    addMemberNote, deleteMemberNote,
+    logAttendance, removeAttendance,
+    loadData,
+  ])
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>
 }

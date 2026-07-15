@@ -32,7 +32,13 @@ fn ensure_folder(path: &PathBuf) -> Result<(), String> {
 /// Open (or create) the SQLite database, resolve the visible data folder for
 /// the Excel mirror + backups, and start the background mirror thread.
 /// Called once by the frontend on every app launch.
-#[tauri::command]
+///
+/// Ordering matters for resilience: the connection is stored into AppState as
+/// soon as the database opens, BEFORE any folder/backup work — so a missing
+/// USB stick or a failed startup backup can never leave the app in a state
+/// where every command (including the one that fixes the folder) errors out.
+/// Recoverable problems are returned as `warning` instead of failing setup.
+#[tauri::command(async)]
 pub fn setup_database(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -47,30 +53,54 @@ pub fn setup_database(
     let created = !db_path.exists();
     let conn = db::open(&db_path)?;
 
-    // Resolve the data folder (persisted setting, or default to Documents)
-    let data_folder = match db::get_setting(&conn, db::SETTING_DATA_FOLDER)? {
-        Some(f) if !f.is_empty() => PathBuf::from(f),
-        _ => {
-            let folder = default_data_folder(&app)?;
-            db::set_setting(&conn, db::SETTING_DATA_FOLDER, &folder.to_string_lossy())?;
-            folder
-        }
-    };
-    ensure_folder(&data_folder)?;
-
-    // Daily auto-backup: take a snapshot on the first launch of each day
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let last = db::get_setting(&conn, db::SETTING_LAST_BACKUP)?.unwrap_or_default();
-    if !created && !last.starts_with(&today) {
-        super::backup::do_create_backup(&conn, "dojo-backup")
-            .map_err(|e| format!("Automatic startup backup failed: {e}"))?;
-    }
-
     {
         let mut db_guard = state.db.lock().map_err(|_| "Database lock poisoned".to_string())?;
         *db_guard = Some(conn);
         let mut path_guard = state.db_path.lock().map_err(|_| "Database lock poisoned".to_string())?;
         *path_guard = Some(db_path.clone());
+    }
+
+    let mut warnings: Vec<String> = Vec::new();
+
+    // Resolve the data folder (persisted setting, or default to Documents).
+    // If the saved folder is unusable (unplugged drive, renamed cloud folder),
+    // fall back to the default so mirror + backups keep working.
+    let data_folder = with_db(&state, |conn| {
+        let mut folder = match db::get_setting(conn, db::SETTING_DATA_FOLDER)? {
+            Some(f) if !f.is_empty() => PathBuf::from(f),
+            _ => default_data_folder(&app)?,
+        };
+        if let Err(e) = ensure_folder(&folder) {
+            let fallback = default_data_folder(&app)?;
+            if fallback != folder && ensure_folder(&fallback).is_ok() {
+                warnings.push(format!(
+                    "Data folder '{}' is unavailable — mirror and backups moved to '{}'. You can change this in Settings. ({e})",
+                    folder.display(),
+                    fallback.display()
+                ));
+                folder = fallback;
+            } else {
+                warnings.push(format!(
+                    "Data folder is unavailable — Excel mirror and backups are paused until it is fixed in Settings. ({e})"
+                ));
+            }
+        }
+        db::set_setting(conn, db::SETTING_DATA_FOLDER, &folder.to_string_lossy())?;
+        Ok(folder)
+    })?;
+
+    // Daily auto-backup: snapshot on the first launch of each day. Never
+    // fatal — a failed backup must not stop the app from opening.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let backup_result = with_db(&state, |conn| {
+        let last = db::get_setting(conn, db::SETTING_LAST_BACKUP)?.unwrap_or_default();
+        if !created && !last.starts_with(&today) {
+            super::backup::do_create_backup(conn, "dojo-backup")?;
+        }
+        Ok(())
+    });
+    if let Err(e) = backup_result {
+        warnings.push(format!("Automatic startup backup failed: {e}"));
     }
 
     state.mirror.start(db_path.clone());
@@ -81,6 +111,7 @@ pub fn setup_database(
         mirror_path: data_folder.join(MIRROR_FILENAME).to_string_lossy().to_string(),
         backup_folder: data_folder.join(BACKUPS_SUBFOLDER).to_string_lossy().to_string(),
         created,
+        warning: if warnings.is_empty() { None } else { Some(warnings.join("\n")) },
     })
 }
 
