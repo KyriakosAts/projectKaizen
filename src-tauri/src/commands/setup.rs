@@ -25,11 +25,16 @@ fn default_data_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     }
 }
 
-/// Android: `document_dir()` is unsupported — use the app sandbox for now.
-/// (Phase B moves this to public `/sdcard/Documents/Dojo Patras` so mirror and
-/// backups survive an uninstall.)
+/// Android: prefer PUBLIC Documents — on this pre-scoped-storage device
+/// (API 27) it is directly writable once the storage permission is granted,
+/// and files there survive an uninstall. Falls back to the app sandbox when
+/// the permission is missing (MainActivity requests it on first launch).
 #[cfg(target_os = "android")]
 fn default_data_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let public = PathBuf::from("/storage/emulated/0/Documents").join(DATA_FOLDER_NAME);
+    if std::fs::create_dir_all(public.join(BACKUPS_SUBFOLDER)).is_ok() {
+        return Ok(public);
+    }
     app.path()
         .app_data_dir()
         .map(|d| d.join(DATA_FOLDER_NAME))
@@ -78,6 +83,12 @@ pub fn setup_database(
     // If the saved folder is unusable (unplugged drive, renamed cloud folder),
     // fall back to the default so mirror + backups keep working.
     let data_folder = with_db(&state, |conn| {
+        // Android: always recompute — the folder isn't user-configurable there,
+        // and this upgrades sandbox → public Documents on the first launch
+        // after the storage permission is granted
+        #[cfg(target_os = "android")]
+        let mut folder = default_data_folder(&app)?;
+        #[cfg(not(target_os = "android"))]
         let mut folder = match db::get_setting(conn, db::SETTING_DATA_FOLDER)? {
             Some(f) if !f.is_empty() => PathBuf::from(f),
             _ => default_data_folder(&app)?,
@@ -100,6 +111,14 @@ pub fn setup_database(
         db::set_setting(conn, db::SETTING_DATA_FOLDER, &folder.to_string_lossy())?;
         Ok(folder)
     })?;
+
+    // Sandboxed storage on Android means backups die with an uninstall — warn
+    #[cfg(target_os = "android")]
+    if data_folder.starts_with("/data/") {
+        warnings.push(
+            "Δεν δόθηκε άδεια αποθήκευσης — τα αντίγραφα ασφαλείας ΔΕΝ θα επιβιώσουν αν απεγκατασταθεί η εφαρμογή. Δώσε άδεια «Αποθήκευση» από Ρυθμίσεις → Εφαρμογές → Dojo Patras και άνοιξε ξανά την εφαρμογή.".to_string(),
+        );
+    }
 
     // Daily auto-backup: snapshot on the first launch of each day. Never
     // fatal — a failed backup must not stop the app from opening.

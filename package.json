@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/plugin-dialog": "2.6.0",
     "date-fns": "^3.6.0",
     "exceljs": "^4.4.0",
     "lucide-react": "^0.447.0",

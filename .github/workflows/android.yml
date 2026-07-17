@@ -14,6 +14,8 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      HAS_SIGNING: ${{ secrets.ANDROID_KEYSTORE_B64 != '' }}
 
     steps:
       - name: Checkout repository
@@ -84,7 +86,27 @@ jobs:
           git commit -m "chore(android): commit generated Android project and icons [skip ci]"
           git push
 
-      - name: Build APK (aarch64, debug-signed prototype)
+      - name: Configure release signing
+        if: env.HAS_SIGNING == 'true'
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > src-tauri/gen/android/keystore.jks
+          {
+            echo "storeFile=keystore.jks"
+            echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "keyPassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+          } > src-tauri/gen/android/keystore.properties
+
+      - name: Build APK (aarch64, release-signed)
+        if: env.HAS_SIGNING == 'true'
+        run: npm run tauri android build -- --apk --target aarch64
+
+      # Without signing secrets, fall back to a debug-signed prototype APK.
+      # NOTE: each debug build has a fresh signature — updates then require
+      # uninstall (which deletes the sandboxed database). Add the secrets
+      # before handing the tablet over.
+      - name: Build APK (aarch64, debug-signed fallback)
+        if: env.HAS_SIGNING != 'true'
         run: npm run tauri android build -- --apk --target aarch64 --debug
 
       - name: Upload APK artifact
