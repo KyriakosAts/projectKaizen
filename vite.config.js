@@ -12,7 +12,8 @@ export default defineConfig({
     hmr: { overlay: false }
   },
   build: {
-    target: process.env.TAURI_ENV_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
+    target: process.env.TAURI_ENV_PLATFORM == 'android' ? 'chrome61'
+          : process.env.TAURI_ENV_PLATFORM == 'windows' ? 'chrome105' : 'safari13',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   }

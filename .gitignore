@@ -1,6 +1,15 @@
 # Tauri
 src-tauri/target/
-src-tauri/gen/
+
+# Android: the generated project (src-tauri/gen/android) IS committed;
+# only its build outputs and local machine/signing files are ignored
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/build/
+src-tauri/gen/android/.gradle/
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/key.properties
+src-tauri/gen/android/keystore.properties
+src-tauri/gen/android/*.jks
 
 # Credentials — NEVER commit these
 .env

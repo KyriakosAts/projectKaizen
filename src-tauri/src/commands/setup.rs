@@ -13,6 +13,7 @@ pub const BACKUPS_SUBFOLDER: &str = "backups";
 
 /// Default visible data folder: `{Documents}/Dojo Patras`, falling back to the
 /// app-data dir when no Documents folder exists.
+#[cfg(not(target_os = "android"))]
 fn default_data_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     match app.path().document_dir() {
         Ok(docs) => Ok(docs.join(DATA_FOLDER_NAME)),
@@ -22,6 +23,17 @@ fn default_data_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
             .map(|d| d.join(DATA_FOLDER_NAME))
             .map_err(|e| format!("Cannot resolve a data folder: {e}")),
     }
+}
+
+/// Android: `document_dir()` is unsupported — use the app sandbox for now.
+/// (Phase B moves this to public `/sdcard/Documents/Dojo Patras` so mirror and
+/// backups survive an uninstall.)
+#[cfg(target_os = "android")]
+fn default_data_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join(DATA_FOLDER_NAME))
+        .map_err(|e| format!("Cannot resolve a data folder: {e}"))
 }
 
 fn ensure_folder(path: &PathBuf) -> Result<(), String> {

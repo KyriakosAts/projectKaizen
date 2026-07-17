@@ -1,0 +1,80 @@
+name: Build Dojo Patras Android APK
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write # first run commits the generated gen/android project back
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages (platform, build-tools, NDK)
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;27.1.12297006"
+
+      - name: Export NDK_HOME
+        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: Set up Rust with Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # ── One-time bootstrap: generate the Android project + icons and commit them ──
+      # Runs only while src-tauri/gen/android is absent from the repo. Local dev
+      # machine cannot run `tauri android init` (no Java/SDK), so CI owns this.
+      - name: Initialize Android project (first run only)
+        if: ${{ hashFiles('src-tauri/gen/android/app/build.gradle.kts') == '' }}
+        run: |
+          npm run tauri android init
+          npm run tauri icon logo.png
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f src-tauri/gen/android src-tauri/icons
+          git add -A
+          git commit -m "chore(android): commit generated Android project and icons [skip ci]"
+          git push
+
+      - name: Build APK (aarch64, debug-signed prototype)
+        run: npm run tauri android build -- --apk --target aarch64 --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dojo-patras-android
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          retention-days: 30
+          if-no-files-found: error
