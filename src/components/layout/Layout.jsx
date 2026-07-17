@@ -1,10 +1,47 @@
 import { useState, useEffect } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, RefreshCw, CloudUpload, X } from 'lucide-react'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import MemberModal from '../MemberModal'
 import { useData } from '../../contexts/DataContext'
+import { isAndroid } from '../../utils/platform'
+
+// Android is a sole device — nag every 7 days to copy a backup off it.
+// "I did it" stamps localStorage; the reminder returns a week later.
+const SHARE_NAG_KEY = 'dojo_backup_share_ack'
+const SHARE_NAG_DAYS = 7
+
+function BackupShareReminder() {
+  const [dismissed, setDismissed] = useState(false)
+  if (!isAndroid() || dismissed) return null
+  const last = Number(localStorage.getItem(SHARE_NAG_KEY) || 0)
+  const daysAgo = (Date.now() - last) / 86_400_000
+  if (daysAgo < SHARE_NAG_DAYS) return null
+
+  function acknowledge() {
+    localStorage.setItem(SHARE_NAG_KEY, String(Date.now()))
+    setDismissed(true)
+  }
+  return (
+    <div className="mx-4 mt-3 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+      <CloudUpload size={16} className="text-amber-600 mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-amber-800">Ώρα για backup εκτός tablet</p>
+        <p className="text-xs text-amber-700 mt-0.5">
+          Άνοιξε την εφαρμογή <strong>Files</strong> → Documents → Dojo Patras → backups και
+          μοίρασε το πιο πρόσφατο αρχείο στο Gmail ή στο Drive. Αν χαθεί το tablet, τα δεδομένα σώζονται.
+        </p>
+      </div>
+      <button
+        onClick={acknowledge}
+        className="shrink-0 flex items-center gap-1 text-xs font-semibold text-amber-700 hover:text-amber-900 px-2 py-1.5"
+      >
+        <X size={12} /> Το έκανα
+      </button>
+    </div>
+  )
+}
 
 export default function Layout() {
   const [activeCategory, setActiveCategory] = useState(
@@ -131,6 +168,7 @@ export default function Layout() {
             </button>
           </div>
         )}
+        <BackupShareReminder />
         <main className="flex-1 overflow-y-auto">
           <Outlet context={{ activeCategory, setActiveCategory, showGlobalAddMember: showAddModal, setShowGlobalAddMember: setShowAddModal, memberSearch }} />
         </main>

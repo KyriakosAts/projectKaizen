@@ -72,11 +72,30 @@ The current data is snapshotted first (`pre-restore-…json`), so a restore can 
 ## Build Output
 
 ```
-src-tauri/target/release/bundle/msi/Dojo Patras_1.0.0_x64_en-US.msi
+src-tauri/target/release/bundle/msi/Dojo Patras_2.0.0_x64_en-US.msi   (Windows)
+src-tauri/gen/android/app/build/outputs/apk/**/app-universal-*.apk    (Android)
 ```
 
-GitHub Actions (`.github/workflows/build.yml`) builds the installer on every push to `main` —
-no secrets required anymore.
+GitHub Actions builds both on every push to `main`:
+- `.github/workflows/build.yml` — Windows installer (no secrets needed)
+- `.github/workflows/android.yml` — Android APK (aarch64). Add the
+  `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS`
+  secrets for a release-signed APK; without them a debug-signed prototype is
+  produced (each debug build has a fresh signature → updates require uninstall).
+
+## Android (Lenovo TB-X304L and similar, API 24+)
+
+- **Install**: enable "install unknown apps", update **Android System WebView**
+  from the Play Store (hard requirement on Android 8/9 — the factory WebView
+  breaks the layout; the app shows an update prompt instead), then open the APK.
+- **Storage**: grant the Storage permission when asked. Data lives in SQLite in
+  the app sandbox; the Excel mirror and JSON backups go to the public
+  `Documents/Dojo Patras/` folder so they **survive an uninstall** and are
+  visible in any file manager.
+- **Off-device backups**: share the newest `backups/*.json` via the Files app
+  (long-press → Share → Gmail/Drive) — the app reminds you weekly. Or install a
+  folder-sync app (e.g. FolderSync) watching `Documents/Dojo Patras/backups`
+  for automatic Google Drive upload.
 
 ---
 
