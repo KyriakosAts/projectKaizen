@@ -10,6 +10,7 @@ import {
   eachDayOfInterval, isToday,
 } from 'date-fns'
 import { useSchedule, DAYS, DAY_LABELS, DAY_SHORT } from '../contexts/ScheduleContext'
+import { confirmDialog } from '../utils/dialogs'
 import { useServices }    from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
 import { hexToRgba } from '../utils/helpers'
@@ -500,7 +501,7 @@ export default function SchedulePage() {
           {schedView === 'weekly' && (
             <>
               <button
-                onClick={() => { if (window.confirm('Reset schedule to the default timetable?')) resetToDefault() }}
+                onClick={async () => { if (await confirmDialog('Reset schedule to the default timetable?')) resetToDefault() }}
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-gray-500 border border-gray-200 hover:bg-gray-50 rounded-xl transition-colors"
               >
                 <RefreshCw size={12} /> Reset

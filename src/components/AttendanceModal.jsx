@@ -6,6 +6,7 @@ import { useServices } from '../contexts/ServicesContext'
 import Modal           from './ui/Modal'
 import Button          from './ui/Button'
 import { hexToRgba, BELT_COLORS, BELT_LABELS, BELTS, CATEGORY_LABELS } from '../utils/helpers'
+import { alertDialog } from '../utils/dialogs'
 
 export default function AttendanceModal({ member, title, sessions, defaultDate, dayClasses, dayEvents, allEvents, memberPayments, onClose, onLogAttendance, onRemoveAttendance, onAddPayment, beltHistory, addBeltPromotion, addMemberNote }) {
   const { services } = useServices()
@@ -64,7 +65,7 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
       setShowPromoForm(false)
       setPromoForm({ category: '', toBelt: '', notes: '' })
     } catch (err) {
-      window.alert(`Could not save promotion: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
+      await alertDialog(`Could not save promotion: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
     } finally {
       setPromoSaving(false)
     }
@@ -110,7 +111,7 @@ export default function AttendanceModal({ member, title, sessions, defaultDate, 
         }
       }
     } catch (err) {
-      window.alert(`Could not save: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
+      await alertDialog(`Could not save: ${typeof err === 'string' ? err : err?.message ?? 'Unknown error'}`)
     } finally { setQuickBusy(null) }
   }
 

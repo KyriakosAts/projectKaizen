@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useServices } from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
+import { confirmDialog } from '../utils/dialogs'
 import { useData } from '../contexts/DataContext'
 import { useSchedule } from '../contexts/ScheduleContext'
 import Card from '../components/ui/Card'
@@ -219,7 +220,7 @@ function InstructorModal({ instructor, services, onClose, onSave, onDelete }) {
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Remove ${instructor.name}?`)) return
+    if (!(await confirmDialog(`Remove ${instructor.name}?`))) return
     setSaving(true)
     try { await onDelete(); onClose() }
     finally { setSaving(false) }

@@ -5,6 +5,8 @@ import { useServices } from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
 import { useSchedule } from '../contexts/ScheduleContext'
 import * as db from '../services/dataService'
+import { confirmDialog, alertDialog } from '../utils/dialogs'
+import { isAndroid } from '../utils/platform'
 import { exportToExcel, exportToJSON } from '../utils/export'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
@@ -33,7 +35,7 @@ export default function ExportModal({ onClose }) {
   const { services }                    = useServices()
   const { instructors }                 = useInstructors()
   const { classes, events }             = useSchedule()
-  const [tab,           setTab]         = useState('excel') // 'excel' | 'json' | 'backups'
+  const [tab,           setTab]         = useState(isAndroid() ? 'backups' : 'excel') // 'excel' | 'json' | 'backups'
   const [categoryFilter, setCategoryFilter] = useState('')
   const [statusFilter,   setStatusFilter]   = useState('')
   const [exporting,      setExporting]      = useState(false)
@@ -61,7 +63,7 @@ export default function ExportModal({ onClose }) {
   }
 
   async function handleRestore(name) {
-    const sure = window.confirm(
+    const sure = await confirmDialog(
       `Restore "${name}"?\n\nAll current data will be replaced with this snapshot. ` +
       `A safety backup of the current data is taken automatically first, so you can undo this.`
     )
@@ -69,7 +71,7 @@ export default function ExportModal({ onClose }) {
     setRestoringName(name); setBackupMsg(null)
     try {
       const r = await db.restoreBackup(name)
-      window.alert(
+      await alertDialog(
         `Restored ${r.members} members, ${r.payments} payments, ${r.attendance} attendance records, ` +
         `${r.beltHistory} belt entries, ${r.memberNotes} notes, ${r.comments} comments.\n\n` +
         `Safety snapshot of the previous data: ${r.safetyBackup}\n\nThe app will now reload.`
@@ -127,12 +129,15 @@ export default function ExportModal({ onClose }) {
     }
   }
 
-  // Tab labels
-  const tabs = [
-    { id: 'excel',   label: '📊 Excel',   desc: 'Spreadsheet export' },
-    { id: 'json',    label: '{ } JSON',   desc: 'Full backup' },
-    { id: 'backups', label: '🕐 Backups', desc: `${backups.length} saved` },
-  ]
+  // Tab labels — blob-URL downloads are silent no-ops in the Android WebView,
+  // so only the (Rust-backed) Backups tab is offered there
+  const tabs = isAndroid()
+    ? [{ id: 'backups', label: '🕐 Backups', desc: `${backups.length} saved` }]
+    : [
+        { id: 'excel',   label: '📊 Excel',   desc: 'Spreadsheet export' },
+        { id: 'json',    label: '{ } JSON',   desc: 'Full backup' },
+        { id: 'backups', label: '🕐 Backups', desc: `${backups.length} saved` },
+      ]
 
   return (
     <Modal
@@ -333,7 +338,7 @@ export default function ExportModal({ onClose }) {
                   <button
                     onClick={() => handleRestore(b.name)}
                     disabled={restoringName !== null}
-                    className="flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors shrink-0"
+                    className="flex items-center gap-1 text-[10px] coarse:text-xs font-semibold px-2.5 py-1.5 coarse:px-4 coarse:py-2.5 rounded-lg bg-white border border-gray-200 text-gray-600 hover:border-amber-300 hover:text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors shrink-0"
                   >
                     {restoringName === b.name ? <RefreshCw size={11} className="animate-spin" /> : <RotateCcw size={11} />}
                     Restore

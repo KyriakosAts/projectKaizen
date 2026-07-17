@@ -21,6 +21,7 @@ import { PageLoader }   from '../components/ui/LoadingSpinner'
 import {
   formatMonth, formatCurrency, formatDate, currentMonthStr, toDate,
 } from '../utils/helpers'
+import { isAndroid } from '../utils/platform'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
@@ -801,12 +802,15 @@ export default function Payments() {
         <p className="text-xs text-gray-400">
           {filteredRows.length}{filteredRows.length !== rows.length ? ` / ${rows.length}` : ''} members
         </p>
-        <button
-          onClick={() => setShowPrintPrev(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-        >
-          <Printer size={13} /> Print Preview
-        </button>
+        {/* window.open() returns null in the Android WebView — no printing there */}
+        {!isAndroid() && (
+          <button
+            onClick={() => setShowPrintPrev(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Printer size={13} /> Print Preview
+          </button>
+        )}
       </div>
 
       {/* Summary cards */}

@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { Sun, Moon, Palette, Clock, Check, Monitor, Image, Building2, Shield, Upload, FileSpreadsheet, Keyboard, Database, Copy, CheckCircle, XCircle, RefreshCw, FolderOpen, HardDriveDownload } from 'lucide-react'
 import { useData } from '../contexts/DataContext'
 import * as db from '../services/dataService'
+import { isAndroid, isCoarsePointer, copyText } from '../utils/platform'
 import { useTheme, ACCENT_PALETTES, TIME_FORMATS, DATE_FORMATS } from '../contexts/ThemeContext'
 import { useServices } from '../contexts/ServicesContext'
 import { useInstructors } from '../contexts/InstructorsContext'
@@ -546,7 +547,7 @@ function ImportSection() {
             className="w-full text-xs font-mono bg-white border border-amber-200 rounded-lg px-3 py-2.5 resize-none focus:outline-none text-gray-700 leading-relaxed"
           />
           <button
-            onClick={() => navigator.clipboard.writeText(AI_PROMPTS[mode])}
+            onClick={() => copyText(AI_PROMPTS[mode])}
             className="absolute top-2 right-2 text-[10px] font-semibold px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded-md transition-colors"
           >
             Copy
@@ -734,9 +735,10 @@ const DEFAULT_SHORTCUTS = [
 function PathRow({ label, value }) {
   const [copied, setCopied] = useState(false)
   function copy() {
-    navigator.clipboard.writeText(value)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    if (copyText(value)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
   }
   return (
     <div className="mb-3">
@@ -818,27 +820,31 @@ function DatabaseSection() {
         </button>
       </div>
 
-      {/* Change data folder */}
-      <p className="text-xs text-gray-500 mb-2 leading-relaxed">
-        <strong className="text-gray-700">Tip:</strong> point the folder below at a OneDrive / Google Drive folder
-        (or a USB stick) and every backup automatically leaves this PC — so the data survives even if the computer dies.
-      </p>
-      <div className="flex gap-2">
-        <input
-          value={folder}
-          onChange={e => setFolder(e.target.value)}
-          placeholder="New data folder, e.g. C:\Users\you\OneDrive\Dojo Patras"
-          className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-400"
-        />
-        <button
-          onClick={handleChangeFolder}
-          disabled={saving || !folder.trim()}
-          className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white text-sm font-semibold rounded-xl hover:bg-gray-900 disabled:opacity-50 transition-colors"
-        >
-          {saving ? <RefreshCw size={14} className="animate-spin" /> : <FolderOpen size={14} />}
-          Change
-        </button>
-      </div>
+      {/* Change data folder — desktop only; Android manages its own storage */}
+      {!isAndroid() && (
+        <>
+          <p className="text-xs text-gray-500 mb-2 leading-relaxed">
+            <strong className="text-gray-700">Tip:</strong> point the folder below at a OneDrive / Google Drive folder
+            (or a USB stick) and every backup automatically leaves this PC — so the data survives even if the computer dies.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={folder}
+              onChange={e => setFolder(e.target.value)}
+              placeholder="New data folder, e.g. C:\Users\you\OneDrive\Dojo Patras"
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-400"
+            />
+            <button
+              onClick={handleChangeFolder}
+              disabled={saving || !folder.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 bg-gray-800 text-white text-sm font-semibold rounded-xl hover:bg-gray-900 disabled:opacity-50 transition-colors"
+            >
+              {saving ? <RefreshCw size={14} className="animate-spin" /> : <FolderOpen size={14} />}
+              Change
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Status */}
       {status && (
@@ -1172,8 +1178,8 @@ export default function SettingsPage() {
       {/* ── Import Data ───────────────────────────────────────────────────────── */}
       <ImportSection />
 
-      {/* ── Keyboard Shortcuts ───────────────────────────────────────────────── */}
-      <ShortcutsSection />
+      {/* ── Keyboard Shortcuts (pointless on a touch device) ─────────────────── */}
+      {!isCoarsePointer() && <ShortcutsSection />}
 
       {/* Footer */}
       <DatabaseSection />

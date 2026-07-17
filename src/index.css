@@ -22,6 +22,11 @@
     transition: background-color 250ms ease, color 250ms ease;
   }
   * { box-sizing: border-box; }
+
+  /* Touch devices: keep every button comfortably tappable */
+  @media (pointer: coarse) {
+    button { min-height: 36px; }
+  }
 }
 
 /* ── Dark mode — structural overrides ─────────────────────────────────────── */

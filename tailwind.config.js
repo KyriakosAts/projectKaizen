@@ -14,6 +14,10 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      screens: {
+        // Touch-first devices (tablet) — used to enlarge tap targets
+        coarse: { raw: '(pointer: coarse)' },
+      },
       fontFamily: {
         sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },
