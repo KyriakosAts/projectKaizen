@@ -55,17 +55,31 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # ── One-time bootstrap: generate the Android project + icons and commit them ──
-      # Runs only while src-tauri/gen/android is absent from the repo. Local dev
-      # machine cannot run `tauri android init` (no Java/SDK), so CI owns this.
+      # ── One-time bootstrap: generate the Android project + icons and commit ──
+      # Local dev machine cannot run `tauri android init` (no Java/SDK), so CI
+      # owns this. Steps are separate so a failure is attributable by name.
+      - name: Check for committed Android project
+        id: gencheck
+        run: echo "exists=$([ -f src-tauri/gen/android/app/build.gradle.kts ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Initialize Android project (first run only)
-        if: ${{ hashFiles('src-tauri/gen/android/app/build.gradle.kts') == '' }}
+        if: steps.gencheck.outputs.exists == 'false'
+        run: npm run tauri android init
+
+      - name: Generate icons (first run only)
+        if: steps.gencheck.outputs.exists == 'false'
+        # repo logo.png is 171x155 and `tauri icon` requires a square source —
+        # gen-icon renders a square 256x256 icon.png (and a square logo.png)
         run: |
-          npm run tauri android init
-          npm run tauri icon logo.png
+          cargo run --manifest-path tools/gen-icon/Cargo.toml --release
+          npm run tauri icon src-tauri/icons/icon.png
+
+      - name: Commit generated Android project (first run only)
+        if: steps.gencheck.outputs.exists == 'false'
+        run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f src-tauri/gen/android src-tauri/icons
+          git add -f src-tauri/gen/android
           git add -A
           git commit -m "chore(android): commit generated Android project and icons [skip ci]"
           git push
