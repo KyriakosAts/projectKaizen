@@ -26,3 +26,6 @@ dist/
 
 # Logs
 *.log
+
+# gen-icon build output
+tools/gen-icon/target/
