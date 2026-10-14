@@ -2,12 +2,9 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::mirror::MirrorHandle;
-
 pub struct AppState {
     pub db: Mutex<Option<Connection>>,
     pub db_path: Mutex<Option<PathBuf>>,
-    pub mirror: MirrorHandle,
 }
 
 impl AppState {
@@ -15,7 +12,6 @@ impl AppState {
         Self {
             db: Mutex::new(None),
             db_path: Mutex::new(None),
-            mirror: MirrorHandle::new(),
         }
     }
 }

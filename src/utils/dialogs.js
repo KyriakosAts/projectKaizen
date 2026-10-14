@@ -7,7 +7,7 @@
  * platform; plain browser dev mode falls back to the window.* built-ins.
  */
 
-import { isTauri } from '../services/dataService'
+import { isTauri } from '../data/backend.js'
 
 export async function confirmDialog(message, title = 'Dojo Patras') {
   if (!isTauri()) return window.confirm(message)

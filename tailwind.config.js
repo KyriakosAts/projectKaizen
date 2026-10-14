@@ -1,6 +1,5 @@
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import colors from 'tailwindcss/colors'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const glob = (p) => join(__dirname, p).replace(/\\/g, '/')
@@ -9,33 +8,22 @@ const glob = (p) => join(__dirname, p).replace(/\\/g, '/')
 export default {
   content: [
     glob('index.html'),
-    glob('src/**/*.{js,jsx}'),
+    glob('src/main.jsx'),
+    glob('src/app/**/*.{js,jsx}'),
+    glob('src/data/**/*.{js,jsx}'),
   ],
-  darkMode: 'class',
   theme: {
     extend: {
-      screens: {
-        // Touch-first devices (tablet) — used to enlarge tap targets
-        coarse: { raw: '(pointer: coarse)' },
-      },
       fontFamily: {
-        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
       },
       colors: {
-        // Primary color uses CSS variables — supports dynamic accent switching
-        // AND opacity modifiers (bg-primary-500/20) via <alpha-value> placeholder
-        primary: {
-          50:  'rgb(var(--primary-50)  / <alpha-value>)',
-          100: 'rgb(var(--primary-100) / <alpha-value>)',
-          400: 'rgb(var(--primary-400) / <alpha-value>)',
-          500: 'rgb(var(--primary-500) / <alpha-value>)',
-          600: 'rgb(var(--primary-600) / <alpha-value>)',
-          700: 'rgb(var(--primary-700) / <alpha-value>)',
-        },
-        sidebar: '#0d1117',
+        paper: '#f5f4f0',   // page background
+        ink: '#1c1917',     // text + navigation rail
       },
-      backgroundImage: {
-        'sidebar-gradient': 'linear-gradient(180deg, #0d1117 0%, #131920 100%)',
+      boxShadow: {
+        card: '0 1px 2px rgb(28 25 23 / 0.06), 0 1px 1px rgb(28 25 23 / 0.04)',
+        sheet: '0 -8px 30px rgb(28 25 23 / 0.18)',
       },
     },
   },

@@ -1,100 +1,50 @@
 //! SQLite data layer — the single source of truth for all app data.
 //!
-//! The database lives at `{app_data_dir}/dojo.db` (WAL mode). All rows are
-//! addressed by UUID primary keys, and every member-owned table declares
-//! `ON DELETE CASCADE`, so deleting a member atomically removes all of their
-//! payments, attendance, belt history, notes and comments.
+//! Since v3 the database is a small document store: every record is a JSON
+//! document in `docs`, addressed by (collection, id). The data model lives
+//! entirely in the frontend (src/data), so changing it never needs a new
+//! native build. `settings` holds app configuration as key → JSON text.
+//!
+//! Tables from the v2 schema (members, payments, …) are left untouched on
+//! upgraded devices; `legacy_snapshot` reads them once so the frontend can
+//! migrate them into documents.
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, types::ValueRef, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::path::Path;
 
-use crate::models::*;
-
 const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS members (
-    id            TEXT PRIMARY KEY,
-    name          TEXT NOT NULL,
-    phone         TEXT,
-    email         TEXT,
-    categories    TEXT NOT NULL DEFAULT '[]',
-    belts         TEXT NOT NULL DEFAULT '{}',
-    service_dates TEXT NOT NULL DEFAULT '{}',
-    join_date     TEXT NOT NULL DEFAULT '',
-    status        TEXT NOT NULL DEFAULT 'active',
-    custom_fee    TEXT,
-    notes         TEXT,
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS payments (
-    id         TEXT PRIMARY KEY,
-    member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    month      TEXT NOT NULL,
-    amount     TEXT NOT NULL DEFAULT '0',
-    status     TEXT NOT NULL DEFAULT 'unpaid',
-    paid_at    TEXT,
-    note       TEXT,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_payments_member ON payments(member_id);
-CREATE INDEX IF NOT EXISTS idx_payments_month  ON payments(month);
-
-CREATE TABLE IF NOT EXISTS attendance (
-    id           TEXT PRIMARY KEY,
-    member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    date         TEXT NOT NULL,
-    session_type TEXT NOT NULL DEFAULT '',
-    note         TEXT,
-    class_id     TEXT,
-    created_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_attendance_member ON attendance(member_id);
-
-CREATE TABLE IF NOT EXISTS belt_history (
-    id          TEXT PRIMARY KEY,
-    member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    category    TEXT NOT NULL DEFAULT '',
-    from_belt   TEXT,
-    to_belt     TEXT NOT NULL DEFAULT '',
-    promoted_at TEXT NOT NULL DEFAULT '',
-    notes       TEXT,
-    created_at  TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_belt_member ON belt_history(member_id);
-
-CREATE TABLE IF NOT EXISTS member_notes (
-    id         TEXT PRIMARY KEY,
-    member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    text       TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_notes_member ON member_notes(member_id);
-
-CREATE TABLE IF NOT EXISTS comments (
-    id         TEXT PRIMARY KEY,
-    member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-    month      TEXT NOT NULL,
-    text       TEXT NOT NULL DEFAULT '',
+CREATE TABLE IF NOT EXISTS docs (
+    collection TEXT NOT NULL,
+    id         TEXT NOT NULL,
+    data       TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(member_id, month)
+    PRIMARY KEY (collection, id)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS logs (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TEXT NOT NULL,
-    action    TEXT NOT NULL,
-    collection TEXT NOT NULL,
-    record_id TEXT NOT NULL,
-    details   TEXT NOT NULL
-);
 "#;
+
+/// Settings that describe this device, not the gym's data — never part of a
+/// backup and never overwritten by a restore.
+pub const SETTING_DATA_FOLDER: &str = "data_folder";
+pub const SETTING_LAST_BACKUP: &str = "last_backup";
+const DEVICE_SETTINGS: [&str; 2] = [SETTING_DATA_FOLDER, SETTING_LAST_BACKUP];
+
+/// v2 tables, in the order the migration needs them.
+const LEGACY_TABLES: [&str; 6] = [
+    "members",
+    "payments",
+    "attendance",
+    "belt_history",
+    "member_notes",
+    "comments",
+];
+const LEGACY_SETTINGS: [&str; 1] = ["services_config"];
 
 pub fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Cannot open database: {e}"))?;
@@ -102,20 +52,17 @@ pub fn open(path: &Path) -> Result<Connection, String> {
         .map_err(|e| format!("Cannot set busy timeout: {e}"))?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| format!("Cannot enable WAL: {e}"))?;
-    conn.pragma_update(None, "foreign_keys", "ON")
-        .map_err(|e| format!("Cannot enable foreign keys: {e}"))?;
     conn.execute_batch(SCHEMA)
         .map_err(|e| format!("Cannot create schema: {e}"))?;
-    // Keep the audit log bounded
-    let _ = conn.execute(
-        "DELETE FROM logs WHERE id < (SELECT COALESCE(MAX(id), 0) FROM logs) - 10000",
-        [],
-    );
     Ok(conn)
 }
 
 fn db_err(e: rusqlite::Error) -> String {
     format!("Database error: {e}")
+}
+
+fn now() -> String {
+    chrono::Utc::now().to_rfc3339()
 }
 
 // ─── Settings (key/value) ──────────────────────────────────────────────────────
@@ -136,397 +83,220 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), Stri
     .map_err(db_err)
 }
 
-// ─── Audit log ─────────────────────────────────────────────────────────────────
-
-pub fn log_action(conn: &Connection, action: &str, collection: &str, record_id: &str, details: &str) {
-    let _ = conn.execute(
-        "INSERT INTO logs (timestamp, action, collection, record_id, details) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![chrono::Utc::now().to_rfc3339(), action, collection, record_id, details],
-    );
-}
-
-// ─── Row mappers ───────────────────────────────────────────────────────────────
-
-fn member_from_row(r: &Row) -> rusqlite::Result<Member> {
-    Ok(Member {
-        id: r.get("id")?,
-        name: r.get("name")?,
-        phone: r.get("phone")?,
-        email: r.get("email")?,
-        categories: r.get("categories")?,
-        belts: r.get("belts")?,
-        service_dates: r.get("service_dates")?,
-        join_date: r.get("join_date")?,
-        status: r.get("status")?,
-        custom_fee: r.get("custom_fee")?,
-        notes: r.get("notes")?,
-        created_at: r.get("created_at")?,
-        updated_at: r.get("updated_at")?,
-    })
-}
-
-fn payment_from_row(r: &Row) -> rusqlite::Result<Payment> {
-    Ok(Payment {
-        id: r.get("id")?,
-        member_id: r.get("member_id")?,
-        month: r.get("month")?,
-        amount: r.get("amount")?,
-        status: r.get("status")?,
-        paid_at: r.get("paid_at")?,
-        note: r.get("note")?,
-        created_at: r.get("created_at")?,
-    })
-}
-
-fn attendance_from_row(r: &Row) -> rusqlite::Result<Attendance> {
-    Ok(Attendance {
-        id: r.get("id")?,
-        member_id: r.get("member_id")?,
-        date: r.get("date")?,
-        session_type: r.get("session_type")?,
-        note: r.get("note")?,
-        class_id: r.get("class_id")?,
-        created_at: r.get("created_at")?,
-    })
-}
-
-fn belt_from_row(r: &Row) -> rusqlite::Result<BeltEntry> {
-    Ok(BeltEntry {
-        id: r.get("id")?,
-        member_id: r.get("member_id")?,
-        category: r.get("category")?,
-        from_belt: r.get("from_belt")?,
-        to_belt: r.get("to_belt")?,
-        promoted_at: r.get("promoted_at")?,
-        notes: r.get("notes")?,
-        created_at: r.get("created_at")?,
-    })
-}
-
-fn note_from_row(r: &Row) -> rusqlite::Result<MemberNote> {
-    Ok(MemberNote {
-        id: r.get("id")?,
-        member_id: r.get("member_id")?,
-        text: r.get("text")?,
-        created_at: r.get("created_at")?,
-    })
-}
-
-fn comment_from_row(r: &Row) -> rusqlite::Result<Comment> {
-    Ok(Comment {
-        id: r.get("id")?,
-        member_id: r.get("member_id")?,
-        month: r.get("month")?,
-        text: r.get("text")?,
-        updated_at: r.get("updated_at")?,
-    })
-}
-
-fn query_all<T>(
-    conn: &Connection,
-    sql: &str,
-    mapper: fn(&Row) -> rusqlite::Result<T>,
-) -> Result<Vec<T>, String> {
-    let mut stmt = conn.prepare(sql).map_err(db_err)?;
-    let rows = stmt.query_map([], mapper).map_err(db_err)?;
-    rows.collect::<rusqlite::Result<Vec<T>>>().map_err(db_err)
-}
-
-// ─── Members ───────────────────────────────────────────────────────────────────
-
-pub fn list_members(conn: &Connection) -> Result<Vec<Member>, String> {
-    query_all(conn, "SELECT * FROM members ORDER BY created_at DESC", member_from_row)
-}
-
-pub fn insert_member(conn: &Connection, m: &Member) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO members (id, name, phone, email, categories, belts, service_dates, join_date, status, custom_fee, notes, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-        params![m.id, m.name, m.phone, m.email, m.categories, m.belts, m.service_dates, m.join_date, m.status, m.custom_fee, m.notes, m.created_at, m.updated_at],
-    )
-    .map(|_| ())
-    .map_err(db_err)
-}
-
-pub fn update_member(conn: &Connection, id: &str, d: &MemberInput, updated_at: &str) -> Result<(), String> {
-    let n = conn
-        .execute(
-            "UPDATE members SET name=?1, phone=?2, email=?3, categories=?4, belts=?5, service_dates=?6, join_date=?7, status=?8, custom_fee=?9, notes=?10, updated_at=?11
-             WHERE id=?12",
-            params![d.name, d.phone, d.email, d.categories, d.belts, d.service_dates, d.join_date, d.status, d.custom_fee, d.notes, updated_at, id],
-        )
+/// All gym settings (device settings excluded), as key → raw value text.
+fn gym_settings(conn: &Connection) -> Result<Map<String, Value>, String> {
+    let mut stmt = conn.prepare("SELECT key, value FROM settings").map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(db_err)?;
-    if n == 0 {
-        return Err(format!("Member '{id}' not found"));
+    let mut out = Map::new();
+    for row in rows {
+        let (k, v) = row.map_err(db_err)?;
+        if !DEVICE_SETTINGS.contains(&k.as_str()) {
+            out.insert(k, Value::String(v));
+        }
     }
-    Ok(())
+    Ok(out)
 }
 
-/// FK cascade removes all payments/attendance/belt history/notes/comments atomically.
-pub fn delete_member_cascade(conn: &Connection, id: &str) -> Result<(), String> {
-    let n = conn
-        .execute("DELETE FROM members WHERE id=?1", params![id])
+// ─── Documents ─────────────────────────────────────────────────────────────────
+
+/// Every document, grouped by collection: `{ "members": [ {...}, … ], … }`.
+/// Each document carries its own `id` field (written by the frontend).
+pub fn load_docs(conn: &Connection) -> Result<Map<String, Value>, String> {
+    let mut stmt = conn
+        .prepare("SELECT collection, data FROM docs ORDER BY collection, id")
         .map_err(db_err)?;
-    if n == 0 {
-        return Err(format!("Member '{id}' not found"));
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(db_err)?;
+    let mut out = Map::new();
+    for row in rows {
+        let (collection, data) = row.map_err(db_err)?;
+        let doc: Value = serde_json::from_str(&data)
+            .map_err(|e| format!("Corrupt document in '{collection}': {e}"))?;
+        match out
+            .entry(collection)
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
+            Value::Array(list) => list.push(doc),
+            _ => unreachable!("collections are always arrays"),
+        }
     }
-    Ok(())
+    Ok(out)
 }
 
-// ─── Payments ──────────────────────────────────────────────────────────────────
-
-pub fn list_payments(conn: &Connection) -> Result<Vec<Payment>, String> {
-    query_all(conn, "SELECT * FROM payments ORDER BY created_at DESC", payment_from_row)
+/// One write in an atomic batch. `put` inserts or replaces the whole document.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Op {
+    pub op: String,
+    pub collection: String,
+    pub id: String,
+    #[serde(default)]
+    pub data: Option<Value>,
 }
 
-pub fn payment_duplicate_exists(conn: &Connection, member_id: &str, month: &str, note: &str) -> Result<bool, String> {
+/// Apply a batch of writes in one transaction: either all land or none do.
+pub fn apply_ops(conn: &mut Connection, ops: &[Op]) -> Result<(), String> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let ts = now();
+    for op in ops {
+        if op.collection.is_empty() || op.id.is_empty() {
+            return Err("Every write needs a collection and an id".to_string());
+        }
+        match op.op.as_str() {
+            "put" => {
+                let data = op
+                    .data
+                    .as_ref()
+                    .ok_or_else(|| format!("put {}/{} has no data", op.collection, op.id))?;
+                let text = serde_json::to_string(data).map_err(|e| format!("Serialize error: {e}"))?;
+                tx.execute(
+                    "INSERT INTO docs (collection, id, data, updated_at) VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(collection, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                    params![op.collection, op.id, text, ts],
+                )
+                .map_err(db_err)?;
+            }
+            "delete" => {
+                tx.execute(
+                    "DELETE FROM docs WHERE collection = ?1 AND id = ?2",
+                    params![op.collection, op.id],
+                )
+                .map_err(db_err)?;
+            }
+            other => return Err(format!("Unknown write operation '{other}'")),
+        }
+    }
+    tx.commit().map_err(db_err)
+}
+
+// ─── Legacy (v2) data ──────────────────────────────────────────────────────────
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM payments WHERE member_id=?1 AND month=?2 AND note IS ?3)",
-        params![member_id, month, note],
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        params![table],
         |r| r.get(0),
     )
     .map_err(db_err)
 }
 
-pub fn insert_payment(conn: &Connection, p: &Payment) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO payments (id, member_id, month, amount, status, paid_at, note, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-        params![p.id, p.member_id, p.month, p.amount, p.status, p.paid_at, p.note, p.created_at],
-    )
-    .map(|_| ())
-    .map_err(db_err)
-}
-
-pub fn set_payment_status(conn: &Connection, id: &str, status: &str, paid_at: Option<&str>) -> Result<(), String> {
-    let n = conn
-        .execute(
-            "UPDATE payments SET status=?1, paid_at=?2 WHERE id=?3",
-            params![status, paid_at, id],
-        )
-        .map_err(db_err)?;
-    if n == 0 {
-        return Err(format!("Payment '{id}' not found"));
-    }
-    Ok(())
-}
-
-// ─── Attendance ────────────────────────────────────────────────────────────────
-
-pub fn list_attendance(conn: &Connection) -> Result<Vec<Attendance>, String> {
-    query_all(conn, "SELECT * FROM attendance ORDER BY created_at DESC", attendance_from_row)
-}
-
-pub fn insert_attendance(conn: &Connection, a: &Attendance) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO attendance (id, member_id, date, session_type, note, class_id, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
-        params![a.id, a.member_id, a.date, a.session_type, a.note, a.class_id, a.created_at],
-    )
-    .map(|_| ())
-    .map_err(db_err)
-}
-
-pub fn delete_attendance(conn: &Connection, id: &str) -> Result<(), String> {
-    let n = conn
-        .execute("DELETE FROM attendance WHERE id=?1", params![id])
-        .map_err(db_err)?;
-    if n == 0 {
-        return Err(format!("Attendance record '{id}' not found"));
-    }
-    Ok(())
-}
-
-// ─── Belt history ──────────────────────────────────────────────────────────────
-
-pub fn list_belt_history(conn: &Connection) -> Result<Vec<BeltEntry>, String> {
-    query_all(conn, "SELECT * FROM belt_history ORDER BY promoted_at DESC, created_at DESC", belt_from_row)
-}
-
-pub fn insert_belt_entry(conn: &Connection, b: &BeltEntry) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO belt_history (id, member_id, category, from_belt, to_belt, promoted_at, notes, created_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-        params![b.id, b.member_id, b.category, b.from_belt, b.to_belt, b.promoted_at, b.notes, b.created_at],
-    )
-    .map(|_| ())
-    .map_err(db_err)
-}
-
-// ─── Member notes ──────────────────────────────────────────────────────────────
-
-pub fn list_member_notes(conn: &Connection) -> Result<Vec<MemberNote>, String> {
-    query_all(conn, "SELECT * FROM member_notes ORDER BY created_at DESC", note_from_row)
-}
-
-pub fn insert_member_note(conn: &Connection, n: &MemberNote) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO member_notes (id, member_id, text, created_at) VALUES (?1,?2,?3,?4)",
-        params![n.id, n.member_id, n.text, n.created_at],
-    )
-    .map(|_| ())
-    .map_err(db_err)
-}
-
-pub fn delete_member_note(conn: &Connection, id: &str) -> Result<(), String> {
-    let n = conn
-        .execute("DELETE FROM member_notes WHERE id=?1", params![id])
-        .map_err(db_err)?;
-    if n == 0 {
-        return Err(format!("Note '{id}' not found"));
-    }
-    Ok(())
-}
-
-// ─── Comments ──────────────────────────────────────────────────────────────────
-
-pub fn list_comments(conn: &Connection) -> Result<Vec<Comment>, String> {
-    query_all(conn, "SELECT * FROM comments ORDER BY updated_at DESC", comment_from_row)
-}
-
-/// Empty text = delete the (member, month) comment; otherwise insert-or-update.
-pub fn upsert_comment(conn: &Connection, member_id: &str, month: &str, text: &str, now: &str) -> Result<(), String> {
-    if text.trim().is_empty() {
-        conn.execute(
-            "DELETE FROM comments WHERE member_id=?1 AND month=?2",
-            params![member_id, month],
-        )
-        .map(|_| ())
-        .map_err(db_err)
-    } else {
-        conn.execute(
-            "INSERT INTO comments (id, member_id, month, text, updated_at) VALUES (?1,?2,?3,?4,?5)
-             ON CONFLICT(member_id, month) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at",
-            params![uuid::Uuid::new_v4().to_string(), member_id, month, text, now],
-        )
-        .map(|_| ())
-        .map_err(db_err)
+fn value_from_sql(v: ValueRef) -> Value {
+    match v {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(i) => Value::from(i),
+        ValueRef::Real(f) => Value::from(f),
+        ValueRef::Text(t) => Value::String(String::from_utf8_lossy(t).into_owned()),
+        ValueRef::Blob(_) => Value::Null,
     }
 }
 
-// ─── Full snapshot (used by backups, restore, and the Excel mirror) ────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigSnapshot {
-    pub services: Option<String>,
-    pub schedule: Option<String>,
-    pub instructors: Option<String>,
+/// Every row of a table as a JSON object keyed by column name.
+fn table_rows(conn: &Connection, table: &str) -> Result<Vec<Value>, String> {
+    // `table` only ever comes from LEGACY_TABLES — never from the frontend
+    let mut stmt = conn.prepare(&format!("SELECT * FROM {table}")).map_err(db_err)?;
+    let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+    let mut rows = stmt.query([]).map_err(db_err)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(db_err)? {
+        let mut obj = Map::new();
+        for (i, col) in columns.iter().enumerate() {
+            obj.insert(col.clone(), value_from_sql(row.get_ref(i).map_err(db_err)?));
+        }
+        out.push(Value::Object(obj));
+    }
+    Ok(out)
 }
+
+/// The v2 tables' contents (`{ members: [...], …, settings: {...} }`), or
+/// `None` when this database never had v2 data.
+pub fn legacy_snapshot(conn: &Connection) -> Result<Option<Value>, String> {
+    let mut out = Map::new();
+    let mut any_rows = false;
+    for table in LEGACY_TABLES {
+        let rows = if table_exists(conn, table)? { table_rows(conn, table)? } else { Vec::new() };
+        any_rows |= !rows.is_empty();
+        out.insert(table.to_string(), Value::Array(rows));
+    }
+    let mut settings = Map::new();
+    for key in LEGACY_SETTINGS {
+        if let Some(v) = get_setting(conn, key)? {
+            settings.insert(key.to_string(), Value::String(v));
+        }
+    }
+    if !any_rows && settings.is_empty() {
+        return Ok(None);
+    }
+    out.insert("settings".to_string(), Value::Object(settings));
+    Ok(Some(Value::Object(out)))
+}
+
+// ─── Full snapshot (backups + restore) ─────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
-    pub members: Vec<Member>,
-    pub payments: Vec<Payment>,
-    pub attendance: Vec<Attendance>,
-    pub belt_history: Vec<BeltEntry>,
-    pub member_notes: Vec<MemberNote>,
-    pub comments: Vec<Comment>,
-    #[serde(default)]
-    pub config: ConfigSnapshot,
+    pub docs: Map<String, Value>,
+    pub settings: Map<String, Value>,
 }
-
-pub const SETTING_SERVICES: &str = "services_config";
-pub const SETTING_SCHEDULE: &str = "schedule_config";
-pub const SETTING_INSTRUCTORS: &str = "instructors_config";
-pub const SETTING_DATA_FOLDER: &str = "data_folder";
-pub const SETTING_LAST_BACKUP: &str = "last_backup";
 
 pub fn snapshot_all(conn: &Connection) -> Result<Snapshot, String> {
     Ok(Snapshot {
-        members: list_members(conn)?,
-        payments: list_payments(conn)?,
-        attendance: list_attendance(conn)?,
-        belt_history: list_belt_history(conn)?,
-        member_notes: list_member_notes(conn)?,
-        comments: list_comments(conn)?,
-        config: ConfigSnapshot {
-            services: get_setting(conn, SETTING_SERVICES)?,
-            schedule: get_setting(conn, SETTING_SCHEDULE)?,
-            instructors: get_setting(conn, SETTING_INSTRUCTORS)?,
-        },
+        docs: load_docs(conn)?,
+        settings: gym_settings(conn)?,
     })
 }
 
-/// Replace ALL data with the snapshot's contents, atomically.
-/// Foreign keys are suspended for the connection during the swap so that
-/// child rows whose parent member is missing (from old exports) don't abort
-/// the restore — they are re-imported as-is.
-pub fn restore_all(conn: &mut Connection, snap: &Snapshot) -> Result<(), String> {
-    conn.pragma_update(None, "foreign_keys", "OFF")
-        .map_err(|e| format!("Cannot suspend foreign keys: {e}"))?;
+/// Number of documents in a snapshot (for restore feedback).
+pub fn doc_count(snap: &Snapshot) -> usize {
+    snap.docs
+        .values()
+        .map(|v| v.as_array().map(|a| a.len()).unwrap_or(0))
+        .sum()
+}
 
-    let result = (|| -> Result<(), String> {
-        let tx = conn.transaction().map_err(db_err)?;
-        tx.execute_batch(
-            "DELETE FROM payments; DELETE FROM attendance; DELETE FROM belt_history;
-             DELETE FROM member_notes; DELETE FROM comments; DELETE FROM members;",
+/// Replace ALL documents and gym settings with the snapshot's, atomically.
+/// Device settings (data folder, last backup) are kept.
+pub fn restore_all(conn: &mut Connection, snap: &Snapshot) -> Result<(), String> {
+    let tx = conn.transaction().map_err(db_err)?;
+    let ts = now();
+    tx.execute("DELETE FROM docs", []).map_err(db_err)?;
+    for (collection, list) in &snap.docs {
+        let list = list
+            .as_array()
+            .ok_or_else(|| format!("Backup collection '{collection}' is not a list"))?;
+        for doc in list {
+            let id = doc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| format!("A '{collection}' record in the backup has no id"))?;
+            let text = serde_json::to_string(doc).map_err(|e| format!("Serialize error: {e}"))?;
+            tx.execute(
+                "INSERT OR REPLACE INTO docs (collection, id, data, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![collection, id, text, ts],
+            )
+            .map_err(db_err)?;
+        }
+    }
+    tx.execute(
+        "DELETE FROM settings WHERE key NOT IN (?1, ?2)",
+        params![SETTING_DATA_FOLDER, SETTING_LAST_BACKUP],
+    )
+    .map_err(db_err)?;
+    for (key, value) in &snap.settings {
+        if DEVICE_SETTINGS.contains(&key.as_str()) {
+            continue;
+        }
+        let text = match value {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, text],
         )
         .map_err(db_err)?;
-
-        for m in &snap.members {
-            tx.execute(
-                "INSERT INTO members (id, name, phone, email, categories, belts, service_dates, join_date, status, custom_fee, notes, created_at, updated_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-                params![m.id, m.name, m.phone, m.email, m.categories, m.belts, m.service_dates, m.join_date, m.status, m.custom_fee, m.notes, m.created_at, m.updated_at],
-            ).map_err(db_err)?;
-        }
-        for p in &snap.payments {
-            tx.execute(
-                "INSERT INTO payments (id, member_id, month, amount, status, paid_at, note, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![p.id, p.member_id, p.month, p.amount, p.status, p.paid_at, p.note, p.created_at],
-            ).map_err(db_err)?;
-        }
-        for a in &snap.attendance {
-            tx.execute(
-                "INSERT INTO attendance (id, member_id, date, session_type, note, class_id, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                params![a.id, a.member_id, a.date, a.session_type, a.note, a.class_id, a.created_at],
-            ).map_err(db_err)?;
-        }
-        for b in &snap.belt_history {
-            tx.execute(
-                "INSERT INTO belt_history (id, member_id, category, from_belt, to_belt, promoted_at, notes, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![b.id, b.member_id, b.category, b.from_belt, b.to_belt, b.promoted_at, b.notes, b.created_at],
-            ).map_err(db_err)?;
-        }
-        for n in &snap.member_notes {
-            tx.execute(
-                "INSERT INTO member_notes (id, member_id, text, created_at) VALUES (?1,?2,?3,?4)",
-                params![n.id, n.member_id, n.text, n.created_at],
-            ).map_err(db_err)?;
-        }
-        for c in &snap.comments {
-            tx.execute(
-                "INSERT INTO comments (id, member_id, month, text, updated_at) VALUES (?1,?2,?3,?4,?5)",
-                params![c.id, c.member_id, c.month, c.text, c.updated_at],
-            ).map_err(db_err)?;
-        }
-
-        // Full fidelity: clear the config keys first so a snapshot taken
-        // before a config existed doesn't inherit the current one
-        tx.execute(
-            "DELETE FROM settings WHERE key IN (?1, ?2, ?3)",
-            params![SETTING_SERVICES, SETTING_SCHEDULE, SETTING_INSTRUCTORS],
-        ).map_err(db_err)?;
-        let mut set = |key: &str, val: &Option<String>| -> Result<(), String> {
-            if let Some(v) = val {
-                tx.execute(
-                    "INSERT INTO settings (key, value) VALUES (?1, ?2)",
-                    params![key, v],
-                ).map(|_| ()).map_err(db_err)?;
-            }
-            Ok(())
-        };
-        set(SETTING_SERVICES, &snap.config.services)?;
-        set(SETTING_SCHEDULE, &snap.config.schedule)?;
-        set(SETTING_INSTRUCTORS, &snap.config.instructors)?;
-
-        tx.commit().map_err(db_err)
-    })();
-
-    let reenable = conn
-        .pragma_update(None, "foreign_keys", "ON")
-        .map_err(|e| format!("Restore succeeded but foreign keys could not be re-enabled — restart the app: {e}"));
-    result.and(reenable)
+    }
+    tx.commit().map_err(db_err)
 }

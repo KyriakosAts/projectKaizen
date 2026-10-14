@@ -1,45 +1,36 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { DataProvider }        from './contexts/DataContext'
-import { ThemeProvider }       from './contexts/ThemeContext'
-import { ServicesProvider }    from './contexts/ServicesContext'
-import { ScheduleProvider }    from './contexts/ScheduleContext'
-import { InstructorsProvider } from './contexts/InstructorsContext'
-import Layout        from './components/layout/Layout'
-import Dashboard     from './pages/Dashboard'
-import Members       from './pages/Members'
-import MemberProfile from './pages/MemberProfile'
-import Payments      from './pages/Payments'
-import Activity      from './pages/Activity'
-import SettingsPage  from './pages/Settings'
-import ServicesPage  from './pages/Services'
-import SchedulePage  from './pages/Schedule'
+import { DataProvider } from './data/DataContext.jsx'
+import { FilterProvider } from './app/filter.jsx'
+import Layout from './app/Layout.jsx'
+import TodayPage from './app/pages/TodayPage.jsx'
+import MembersPage from './app/pages/MembersPage.jsx'
+import MemberPage from './app/pages/MemberPage.jsx'
+import GridPage from './app/pages/GridPage.jsx'
+import SeminarsPage from './app/pages/SeminarsPage.jsx'
+import SeminarPage from './app/pages/SeminarPage.jsx'
+import StatsPage from './app/pages/StatsPage.jsx'
+import SettingsPage from './app/pages/SettingsPage.jsx'
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BrowserRouter>
-        <DataProvider>
-          <ServicesProvider>
-            <InstructorsProvider>
-              <ScheduleProvider>
-                <Routes>
-                  <Route path="/" element={<Layout />}>
-                    <Route index element={<Navigate to="/dashboard" replace />} />
-                    <Route path="dashboard"         element={<Dashboard />} />
-                    <Route path="members"           element={<Members />} />
-                    <Route path="members/:memberId" element={<MemberProfile />} />
-                    <Route path="payments"          element={<Payments />} />
-                    <Route path="activity"          element={<Activity />} />
-                    <Route path="settings"          element={<SettingsPage />} />
-                    <Route path="services"          element={<ServicesPage />} />
-                    <Route path="schedule"          element={<SchedulePage />} />
-                  </Route>
-                </Routes>
-              </ScheduleProvider>
-            </InstructorsProvider>
-          </ServicesProvider>
-        </DataProvider>
-      </BrowserRouter>
-    </ThemeProvider>
+    <BrowserRouter>
+      <DataProvider>
+        <FilterProvider>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<TodayPage />} />
+              <Route path="members" element={<MembersPage />} />
+              <Route path="members/:memberId" element={<MemberPage />} />
+              <Route path="grid" element={<GridPage />} />
+              <Route path="seminars" element={<SeminarsPage />} />
+              <Route path="seminars/:seminarId" element={<SeminarPage />} />
+              <Route path="stats" element={<StatsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Route>
+          </Routes>
+        </FilterProvider>
+      </DataProvider>
+    </BrowserRouter>
   )
 }

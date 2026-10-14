@@ -11,6 +11,10 @@ use crate::{
 
 const KEEP_AUTO_BACKUPS: usize = 30;
 const KEEP_PRE_RESTORE: usize = 5;
+/// Backup format 4 = the document store (app v3). Older formats (3 = app v2
+/// SQLite tables, 1/2 = Google Sheets era) use other layouts and are rejected
+/// by restore.
+const BACKUP_VERSION: &str = "4.0";
 
 fn backups_dir(conn: &Connection) -> Result<PathBuf, String> {
     let folder = db::get_setting(conn, db::SETTING_DATA_FOLDER)?
@@ -50,7 +54,7 @@ pub fn do_create_backup(conn: &Connection, prefix: &str) -> Result<BackupInfo, S
 
     let doc = serde_json::json!({
         "exportedAt": chrono::Utc::now().to_rfc3339(),
-        "version": "3.0",
+        "version": BACKUP_VERSION,
         "data": snapshot,
     });
     let json_str = serde_json::to_string_pretty(&doc).map_err(|e| format!("Serialize error: {e}"))?;
@@ -70,6 +74,22 @@ pub fn do_create_backup(conn: &Connection, prefix: &str) -> Result<BackupInfo, S
         local_path: Some(path.to_string_lossy().to_string()),
         size_bytes: Some(json_str.len() as u64),
     })
+}
+
+/// One-time safety copy of a pre-v3 database (its tables are migrated by the
+/// frontend). `VACUUM INTO` writes a consistent copy even in WAL mode. The
+/// legacy tables themselves are never modified either.
+pub fn copy_legacy_db_once(conn: &Connection) -> Result<(), String> {
+    if db::legacy_snapshot(conn)?.is_none() {
+        return Ok(());
+    }
+    let path = backups_dir(conn)?.join("pre-v3-dojo.db");
+    if path.exists() {
+        return Ok(());
+    }
+    conn.execute("VACUUM INTO ?1", rusqlite::params![path.to_string_lossy().to_string()])
+        .map(|_| ())
+        .map_err(|e| format!("Cannot copy the old database: {e}"))
 }
 
 #[tauri::command(async)]
@@ -116,8 +136,6 @@ pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<BackupInfo>, Strin
 
 #[derive(Deserialize)]
 struct BackupDoc {
-    #[serde(default)]
-    version: Option<String>,
     data: db::Snapshot,
 }
 
@@ -140,31 +158,27 @@ pub fn restore_backup(state: State<'_, AppState>, name: String) -> Result<Restor
         let path = backups_dir(conn)?.join(&name);
         let raw = std::fs::read_to_string(&path)
             .map_err(|e| format!("Cannot read backup '{name}': {e}"))?;
-        let doc: BackupDoc = serde_json::from_str(&raw)
-            .map_err(|e| format!("'{name}' is not a valid Dojo Patras backup: {e}"))?;
-        if let Some(v) = &doc.version {
-            if !v.starts_with("3.") {
-                return Err(format!(
-                    "'{name}' is a version {v} backup from the old Google Sheets era and cannot be restored directly. Use Settings → Import Data instead."
-                ));
-            }
+        // Check the format version before the layout, so an old backup gets
+        // a clear message instead of a parse error
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("Το '{name}' δεν είναι αρχείο αντιγράφου του Dojo Patras: {e}"))?;
+        let version = value.get("version").and_then(|v| v.as_str()).unwrap_or("");
+        if !version.starts_with("4.") {
+            return Err(format!(
+                "Το '{name}' είναι αντίγραφο από παλιότερη έκδοση της εφαρμογής ({version}) και δεν μπορεί να επαναφερθεί."
+            ));
         }
+        let doc: BackupDoc = serde_json::from_value(value)
+            .map_err(|e| format!("Το '{name}' είναι κατεστραμμένο: {e}"))?;
 
         let safety = do_create_backup(conn, "pre-restore")?;
         db::restore_all(conn, &doc.data)?;
-        db::log_action(conn, "RESTORE", "all", &name, &format!("safety snapshot: {}", safety.name));
 
         Ok(RestoreResult {
-            members: doc.data.members.len(),
-            payments: doc.data.payments.len(),
-            attendance: doc.data.attendance.len(),
-            belt_history: doc.data.belt_history.len(),
-            member_notes: doc.data.member_notes.len(),
-            comments: doc.data.comments.len(),
+            records: db::doc_count(&doc.data),
             safety_backup: safety.name,
         })
     })?;
 
-    state.mirror.mark_dirty();
     Ok(result)
 }

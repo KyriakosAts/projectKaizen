@@ -3,7 +3,6 @@ use tauri::{Manager, State};
 
 use crate::{
     db,
-    mirror::MIRROR_FILENAME,
     models::{AppSettings, SetupResult},
     state::{with_db, AppState},
 };
@@ -46,8 +45,8 @@ fn ensure_folder(path: &PathBuf) -> Result<(), String> {
         .map_err(|e| format!("Cannot create data folder '{}': {e}", path.display()))
 }
 
-/// Open (or create) the SQLite database, resolve the visible data folder for
-/// the Excel mirror + backups, and start the background mirror thread.
+/// Open (or create) the SQLite database and resolve the visible data folder
+/// for backups and exports.
 /// Called once by the frontend on every app launch.
 ///
 /// Ordering matters for resilience: the connection is stored into AppState as
@@ -81,7 +80,7 @@ pub fn setup_database(
 
     // Resolve the data folder (persisted setting, or default to Documents).
     // If the saved folder is unusable (unplugged drive, renamed cloud folder),
-    // fall back to the default so mirror + backups keep working.
+    // fall back to the default so backups keep working.
     let data_folder = with_db(&state, |conn| {
         // Android: always recompute — the folder isn't user-configurable there,
         // and this upgrades sandbox → public Documents on the first launch
@@ -97,14 +96,14 @@ pub fn setup_database(
             let fallback = default_data_folder(&app)?;
             if fallback != folder && ensure_folder(&fallback).is_ok() {
                 warnings.push(format!(
-                    "Data folder '{}' is unavailable — mirror and backups moved to '{}'. You can change this in Settings. ({e})",
+                    "Ο φάκελος δεδομένων '{}' δεν είναι διαθέσιμος — τα αντίγραφα ασφαλείας γράφονται πλέον στο '{}'. ({e})",
                     folder.display(),
                     fallback.display()
                 ));
                 folder = fallback;
             } else {
                 warnings.push(format!(
-                    "Data folder is unavailable — Excel mirror and backups are paused until it is fixed in Settings. ({e})"
+                    "Ο φάκελος δεδομένων δεν είναι διαθέσιμος — τα αντίγραφα ασφαλείας σταμάτησαν μέχρι να διορθωθεί. ({e})"
                 ));
             }
         }
@@ -131,15 +130,18 @@ pub fn setup_database(
         Ok(())
     });
     if let Err(e) = backup_result {
-        warnings.push(format!("Automatic startup backup failed: {e}"));
+        warnings.push(format!("Το αυτόματο αντίγραφο ασφαλείας απέτυχε: {e}"));
     }
 
-    state.mirror.start(db_path.clone());
-    state.mirror.mark_dirty();
+    // Upgrading from v2: keep a full copy of the old database before the
+    // frontend migrates its data
+    if let Err(e) = with_db(&state, super::backup::copy_legacy_db_once) {
+        warnings.push(format!("Δεν κρατήθηκε αντίγραφο της παλιάς βάσης: {e}"));
+    }
 
     Ok(SetupResult {
         db_path: db_path.to_string_lossy().to_string(),
-        mirror_path: data_folder.join(MIRROR_FILENAME).to_string_lossy().to_string(),
+        data_folder: data_folder.to_string_lossy().to_string(),
         backup_folder: data_folder.join(BACKUPS_SUBFOLDER).to_string_lossy().to_string(),
         created,
         warning: if warnings.is_empty() { None } else { Some(warnings.join("\n")) },
@@ -160,7 +162,7 @@ fn settings_from_db(state: &AppState) -> Result<AppSettings, String> {
         let folder_path = PathBuf::from(&folder);
         Ok(AppSettings {
             db_path: db_path.clone(),
-            mirror_path: folder_path.join(MIRROR_FILENAME).to_string_lossy().to_string(),
+            data_folder: folder.clone(),
             backup_folder: folder_path.join(BACKUPS_SUBFOLDER).to_string_lossy().to_string(),
             last_backup: db::get_setting(conn, db::SETTING_LAST_BACKUP)?,
         })
@@ -172,9 +174,8 @@ pub fn get_app_config(state: State<'_, AppState>) -> Result<AppSettings, String>
     settings_from_db(&state)
 }
 
-/// Move the mirror + backup location (e.g. into a OneDrive/Google Drive folder
-/// or a USB stick so backups leave the PC). Future mirrors and backups are
-/// written there; existing files are not moved.
+/// Move the backup/export location (e.g. into a OneDrive folder or a USB
+/// stick so backups leave the PC). Existing files are not moved.
 #[tauri::command]
 pub fn set_data_folder(state: State<'_, AppState>, path: String) -> Result<AppSettings, String> {
     let folder = PathBuf::from(path.trim());
@@ -185,6 +186,5 @@ pub fn set_data_folder(state: State<'_, AppState>, path: String) -> Result<AppSe
     with_db(&state, |conn| {
         db::set_setting(conn, db::SETTING_DATA_FOLDER, &folder.to_string_lossy())
     })?;
-    state.mirror.mark_dirty();
     settings_from_db(&state)
 }

@@ -2,17 +2,24 @@
 
 ## Architecture
 
-The app runs as a **Tauri v2 desktop application**. All data lives in a **local SQLite database** on the PC — no cloud account, no API keys, no internet required.
+The app runs as a **Tauri v2 application** (Android tablet and Windows). All data lives in a **local SQLite database** on the device — no cloud account, no API keys, no internet required.
 
 ```
-React UI → Tauri commands (Rust) → SQLite (dojo.db)
-                                      ├─→ Excel mirror (dojo-patras-database.xlsx, auto-updated)
-                                      └─→ JSON snapshots (backups/, daily + manual, restorable in-app)
+React UI (src/app) → business rules (src/data/model.js) → Tauri commands (Rust) → SQLite (dojo.db)
+                                                                                 └─→ JSON snapshots (backups/)
 ```
 
-- **SQLite** is the single source of truth. Writes are transactional; deleting a member removes all their payments/attendance/history atomically.
-- **Excel mirror**: a human-readable `.xlsx` copy of the whole database, rewritten automatically a couple of seconds after any change. Open it anytime — it's read-only from the app's point of view, so editing it never touches the real data.
-- **Backups**: a timestamped JSON snapshot is written automatically on the first launch of each day (30 kept), plus on demand via *Export → Backups → Backup Now*. Any snapshot can be restored in-app; a safety snapshot of the current data is always taken first.
+- **SQLite** is a small document store: every record is a JSON document in `docs` (collection + id).
+  The data model lives entirely in the frontend (`src/data`), so changing it never needs Rust changes.
+- **Business rules** (payment coverage, member status, statistics, filters) live only in
+  `src/data/model.js` and are covered by `npm test`.
+- **Configuration** (groups, plans, prices, belts, warning/pause days, PIN, reminder text) is stored
+  in the database and edited in the app — no rebuild needed.
+- **Backups**: a timestamped JSON snapshot is written automatically on the first launch of each day
+  (30 kept), plus on demand in *Ρυθμίσεις → Δεδομένα & αντίγραφα*. Any snapshot can be restored
+  in-app; a safety snapshot of the current data is always taken first.
+- **Excel**: exported on demand (whole gym or the current filtered list) and, optionally, every month
+  on a chosen day, into the `exports/` folder.
 
 ---
 
@@ -30,72 +37,51 @@ React UI → Tauri commands (Rust) → SQLite (dojo.db)
 ```bash
 npm install
 
-# Development (with hot reload)
-npm run tauri:dev
-
-# Production build
-npm run tauri:build
+npm test             # business-rule tests (no native toolchain needed)
+npm run dev          # UI in a browser, data in localStorage (no Rust needed)
+npm run tauri:dev    # full app with hot reload
+npm run tauri:build  # production build
 ```
 
-No configuration files or environment variables are needed. On first launch the app automatically:
+On first launch the app creates the database at `{AppData}/com.dojopatras.app/dojo.db` and the visible
+data folder `{Documents}/Dojo Patras` with `backups/` and `exports/`.
 
-1. Creates the database at `{AppData}/com.dojopatras.app/dojo.db`
-2. Creates the visible data folder `{Documents}/Dojo Patras` with:
-   - `dojo-patras-database.xlsx` — the live Excel mirror
-   - `backups/` — daily + manual JSON snapshots
-
----
-
-## Keeping backups off the PC (recommended)
-
-In **Settings → Database & Backups** you can move the data folder anywhere — point it at a
-**OneDrive / Google Drive desktop folder** (or a USB stick) and every mirror update and backup
-automatically leaves the machine. If the PC dies, the data survives.
+**Upgrading from v2**: the old tables are migrated automatically on the first v3 launch. A full copy of
+the old database is kept first as `backups/pre-v3-dojo.db`; the old tables themselves are not modified.
+Backups made by v2 cannot be restored into v3.
 
 ---
 
-## Migrating data from the old Google Sheets version
+## Keeping backups off the device (recommended)
 
-Use **Settings → Import Data**. Either paste AI-transformed JSON (prompts are provided in the UI),
-or export the old spreadsheet and run it through the *Import All* flow. Imports are fast — everything
-is written locally.
-
----
-
-## Restore from a backup
-
-**Export button (top bar) → Backups tab** — pick any snapshot and click *Restore*.
-The current data is snapshotted first (`pre-restore-…json`), so a restore can itself be undone.
+- **Windows**: in *Ρυθμίσεις → Δεδομένα & αντίγραφα* point the data folder at a OneDrive / Google Drive
+  desktop folder (or a USB stick).
+- **Android**: share the newest `backups/*.json` via the Files app (long-press → Share → Gmail/Drive) —
+  the app reminds you weekly.
 
 ---
 
 ## Build Output
 
 ```
-src-tauri/target/release/bundle/msi/Dojo Patras_2.0.0_x64_en-US.msi   (Windows)
+src-tauri/target/release/bundle/msi/Dojo Patras_3.0.0_x64_en-US.msi   (Windows)
 src-tauri/gen/android/app/build/outputs/apk/**/app-universal-*.apk    (Android)
 ```
 
-GitHub Actions builds both on every push to `main`:
-- `.github/workflows/build.yml` — Windows installer (no secrets needed)
-- `.github/workflows/android.yml` — Android APK (aarch64). Add the
-  `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS`
-  secrets for a release-signed APK; without them a debug-signed prototype is
-  produced (each debug build has a fresh signature → updates require uninstall).
+GitHub Actions builds both on every push to `main` (and to `redesign` while v3 is being finished):
+- `.github/workflows/build.yml` — Windows installer
+- `.github/workflows/android.yml` — Android APK (aarch64), release-signed with the
+  `ANDROID_KEYSTORE_B64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` secrets so every build
+  installs over the previous one.
 
 ## Android (Lenovo TB-X304L and similar, API 24+)
 
-- **Install**: enable "install unknown apps", update **Android System WebView**
-  from the Play Store (hard requirement on Android 8/9 — the factory WebView
-  breaks the layout; the app shows an update prompt instead), then open the APK.
-- **Storage**: grant the Storage permission when asked. Data lives in SQLite in
-  the app sandbox; the Excel mirror and JSON backups go to the public
-  `Documents/Dojo Patras/` folder so they **survive an uninstall** and are
-  visible in any file manager.
-- **Off-device backups**: share the newest `backups/*.json` via the Files app
-  (long-press → Share → Gmail/Drive) — the app reminds you weekly. Or install a
-  folder-sync app (e.g. FolderSync) watching `Documents/Dojo Patras/backups`
-  for automatic Google Drive upload.
+- **Install**: enable "install unknown apps", update **Android System WebView** from the Play Store
+  (the app needs Chromium 84+ and shows an update prompt otherwise), then open the APK.
+- **Storage**: grant the Storage permission when asked, so backups and exports go to the public
+  `Documents/Dojo Patras/` folder and **survive an uninstall**.
+- **Keyboard**: the activity uses `adjustResize` (no edge-to-edge), so the page shrinks when the
+  keyboard opens; forms keep their save button at the top.
 
 ---
 
@@ -104,6 +90,5 @@ GitHub Actions builds both on every push to `main`:
 | Error | Fix |
 |-------|-----|
 | "Database not initialized" | Restart the app; check `{AppData}/com.dojopatras.app` is writable |
-| Excel mirror not updating | Close the file in Excel — the app retries automatically every few seconds |
-| "Cannot replace Excel mirror" | Same as above: the file is locked while open in Excel |
-| Restore fails | Make sure the `.json` file is inside the backup folder shown in Settings |
+| Restore fails | Make sure the `.json` file is inside the backup folder shown in Settings and was made by v3 |
+| Reminder button does nothing | The member needs a phone number; WhatsApp/Viber must be installed |

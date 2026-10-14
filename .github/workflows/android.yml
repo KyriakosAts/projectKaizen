@@ -2,7 +2,7 @@ name: Build Dojo Patras Android APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, redesign]
     paths-ignore:
       - "*.md"
   workflow_dispatch:
